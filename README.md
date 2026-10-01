@@ -90,7 +90,7 @@ Required checks before publication:
 6. For GPT-6-Luna, Sol, GPT-6.1-Sol and Astra, a local mock Responses server requests a random-marker shell command. Check the actual marker and exit status 17 return in the next model request, on native Linux and inside iSH. These tests establish the execution path, not authenticated service acceptance or a real model's tool choice.
 7. App-server pipe and PTY shell calls, captured output and exit status 17 inside standard iSH. Installer/startup checks use actual ELF32 executables on Linux; their architecture detection is supplied by a test-only `uname` wrapper.
 
-Only a successful build and emulator verification allow Release publication. Physical-device authentication and shell testing remain an additional check. Detailed actual run links and results will be added as they become available.
+Only a successful build and emulator verification allow Release publication. Physical-device authentication and shell testing remain an additional check. Recorded preliminary checks: [dependency metadata run 36932313300](https://github.com/leungantoine/codex-ish-x86/actions/runs/36932313300) passed and its generated patch is committed under `metadata/`. [Build attempt 36932975814](https://github.com/leungantoine/codex-ish-x86/actions/runs/36932975814) passed all 62 native PTY tests, all three syscall-fallback harness modes, and a static ELF32 Rust program under QEMU; it stopped on a build-script environment assignment before compiling Codex. That assignment is fixed in the next run. These checks do not establish a working Codex x86 binary. Detailed build and emulator results will be recorded when available.
 
 ## Troubleshooting
 
