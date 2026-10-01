@@ -1,0 +1,232 @@
+name: Verify and publish compiled standard iSH candidate
+on:
+  workflow_run:
+    workflows: [Build and verify Codex for standard iSH]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  prepare:
+    # This recovery pass reuses the exact build whose trace fixture needed fixing.
+    # Future builds use the corrected primary workflow instead.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.id == 36941651734
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SOURCE_RUN: '36941651734'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require successful immutable build job and fetch its real binaries
+        run: |
+          test "$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN --jq .head_sha)" = ed3b3acfd92912e808a562017d1342c1110654cd
+          test "$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN --jq .head_branch)" = main
+          test "$(gh api repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/jobs --jq '.jobs[] | select(.name == "build") | .conclusion')" = success
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --name codex-ish-x86
+          sha256sum -c codex-ish-x86.tar.gz.sha256
+          mkdir package
+          tar -xzf codex-ish-x86.tar.gz -C package
+          (cd package && sha256sum -c SHA256SUMS)
+          package/codex --version | grep -Fx 'codex-cli 0.160.0'
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+          info=json.loads(Path('package/compat/PATCHINFO.json').read_text())
+          assert info['upstream_commit']=='a956835d020762cb2b570053af06f643a11c0ecc'
+          assert info['target']=='i686-unknown-linux-musl'
+          assert 'InvalidTargetArch' in info['x86_seccomp_policy']
+          std=json.loads(Path('package/compat/RUSTSTDINFO.json').read_text())
+          assert std['rust_version']=='1.95.0'
+          assert std['files']['library/std/src/sys/thread/unix.rs']['original_sha256']=='95920ddfd37a3864783624e0fa8df849fe919a8c5a9b733892e1bea38c0f411d'
+          PYTHON
+          for name in codex codex-responses-api-proxy codex-path/rg diagnostics/ish-syscall-probe; do
+            readelf -h "package/$name" | grep -q 'Class:.*ELF32'
+            readelf -h "package/$name" | grep -q 'Machine:.*Intel 80386'
+            if readelf -l "package/$name" | grep -q INTERP; then exit 1; fi
+            if readelf -d "package/$name" | grep -q '(NEEDED)'; then exit 1; fi
+          done
+      - name: Include current setup and guide while preserving executable hashes
+        run: |
+          (cd package && sha256sum codex codex-responses-api-proxy codex-path/rg diagnostics/ish-syscall-probe > "$RUNNER_TEMP/executables.sha256")
+          cp README.md package/README.md
+          cp setup.sh package/setup.sh
+          mkdir -p package/metadata
+          cp metadata/README.md metadata/bazel-dependency-lock.patch package/metadata/
+          (cd package && sha256sum -c "$RUNNER_TEMP/executables.sha256")
+          (cd package && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          tar -czf codex-ish-x86.tar.gz -C package .
+          sha256sum codex-ish-x86.tar.gz > codex-ish-x86.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x86-candidate-release
+          path: |
+            codex-ish-x86.tar.gz
+            codex-ish-x86.tar.gz.sha256
+          if-no-files-found: error
+  verify:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: x86-candidate-release
+      - name: Verify actual native ELF32 direct model tools
+        run: |
+          sha256sum -c codex-ish-x86.tar.gz.sha256
+          mkdir package
+          tar -xzf codex-ish-x86.tar.gz -C package
+          (cd package && sha256sum -c SHA256SUMS)
+          for model in gpt-6-luna gpt-6-sol gpt-6.1-sol gpt-6-astra; do
+            python3 tests/reproduce-direct-model.py "linux-x86-$model" "$PWD/package/compat/models-direct.json" "$model" "$PWD/package/codex"
+          done
+      - name: Verify one-command setup and fresh startup PATH
+        run: |
+          # Run actual ELF32 binaries natively on the x86_64 builder for the installer check.
+          # Only uname -m is overridden; all executable and checksum checks are real.
+          sudo apt-get update
+          sudo apt-get install -y busybox-static
+          mkdir "$RUNNER_TEMP/x86-uname"
+          printf '#!/bin/sh\nif [ "$1" = -m ]; then echo i686; else /usr/bin/uname "$@"; fi\n' > "$RUNNER_TEMP/x86-uname/uname"
+          chmod +x "$RUNNER_TEMP/x86-uname/uname"
+          PATH="$RUNNER_TEMP/x86-uname:$PATH" CODEX_ISH_RELEASE_BASE="file://$PWD" sh setup.sh
+          env -i HOME="$HOME" PATH=/usr/bin:/bin /bin/bash --login -c 'command -v codex; codex --version'
+          env -i HOME="$HOME" PATH=/usr/bin:/bin /bin/busybox ash -l -c 'command -v codex; codex --version'
+          python3 tests/reproduce-direct-model.py setup-x86 "$PWD/package/compat/models-direct.json" gpt-6-luna "$HOME/.local/bin/codex"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-x86-tool-logs
+          path: '*-stderr.log'
+  verify-ish:
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: x86-candidate-release
+      - name: Build unmodified released standard iSH Darwin ARM64 backend
+        run: |
+          brew install meson ninja llvm lld libarchive pkg-config coreutils
+          export PATH="$(brew --prefix llvm)/bin:$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+          export PKG_CONFIG_PATH="$(brew --prefix libarchive)/lib/pkgconfig"
+          hostname
+          sudo hostname ish-x86-test
+          git clone --depth 1 --branch builds/494 https://github.com/ish-app/ish.git emulator
+          test "$(git -C emulator rev-parse HEAD)" = 216cf98a7cda1d68221add374630ede00aae9cd4
+          git -C emulator submodule update --init --depth 1 deps/libapps
+          CC=clang meson setup emulator/build emulator --buildtype=debugoptimized
+          ninja -C emulator/build -j 2 ish tools/fakefsify
+      - name: Prepare checksum verified x86 Alpine guest and release
+        run: |
+          export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+          sha256sum -c codex-ish-x86.tar.gz.sha256
+          mkdir package root
+          tar -xzf codex-ish-x86.tar.gz -C package
+          (cd package && sha256sum -c SHA256SUMS)
+          base=https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86
+          curl -fsSL "$base/alpine-minirootfs-3.23.3-x86.tar.gz" -o alpine.tar.gz
+          curl -fsSL "$base/alpine-minirootfs-3.23.3-x86.tar.gz.sha256" -o alpine.sha256
+          test "$(sha256sum alpine.tar.gz | cut -d ' ' -f1)" = "$(cut -d ' ' -f1 alpine.sha256)"
+          tar -xzf alpine.tar.gz -C root
+          cp -a package root/codex
+          tar -czf guest.tar.gz -C root .
+          emulator/build/tools/fakefsify guest.tar.gz guest
+          # Alpine minirootfs omits nodes normally supplied by the iOS app.
+          timeout 120 emulator/build/ish -f guest /bin/sh -ec '
+            mknod -m 666 /dev/null c 1 3
+            mknod -m 666 /dev/zero c 1 5
+            mknod -m 666 /dev/full c 1 7
+            mknod -m 666 /dev/random c 1 8
+            mknod -m 666 /dev/urandom c 1 9
+            mknod -m 666 /dev/tty c 5 0
+            mknod -m 666 /dev/ptmx c 5 2
+            test -c /dev/null
+          '
+      - name: Version and syscall checks in standard iSH
+        run: |
+          export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+          timeout 120 emulator/build/ish -f guest /codex/codex --version | grep -Fx 'codex-cli 0.160.0'
+          timeout 120 emulator/build/ish -f guest /codex/diagnostics/ish-syscall-probe
+      - name: Real model tool requests and subprocess roundtrips in standard iSH
+        run: |
+          export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+          ulimit -n 4096
+          for model in gpt-6-luna gpt-6-sol gpt-6.1-sol gpt-6-astra; do
+            timeout 300 python3 tests/reproduce-direct-model.py "ish-x86-$model" /codex/compat/models-direct.json "$model" emulator/build/ish -f guest /codex/codex
+          done
+          timeout 300 python3 tests/reproduce-ish.py ish-x86 emulator/build/ish -f guest /codex/codex --no-daemon --disable code_mode_host -c 'sandbox_mode="danger-full-access"' app-server --stdio
+      - name: Print app-server errors if verification fails
+        if: failure()
+        run: tail -80 ish-x86*-stderr.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: standard-ish-x86-tool-logs
+          path: '*-stderr.log'
+  publish:
+    needs: [verify, verify-ish]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: x86-candidate-release
+      - name: Record passed verification and package final guide
+        run: |
+          sha256sum -c codex-ish-x86.tar.gz.sha256
+          mkdir package
+          tar -xzf codex-ish-x86.tar.gz -C package
+          (cd package && sha256sum -c SHA256SUMS)
+          (cd package && sha256sum codex codex-responses-api-proxy codex-path/rg diagnostics/ish-syscall-probe > "$RUNNER_TEMP/executables.sha256")
+          gh api "repos/$GITHUB_REPOSITORY/contents/README.md" > "$RUNNER_TEMP/readme-existing.json"
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import os,json,base64
+          p=Path('package/README.md')
+          current=json.loads(Path(os.environ['RUNNER_TEMP'], 'readme-existing.json').read_text())
+          s=base64.b64decode(current['content']).decode()
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('README_SHA='+current['sha']+'\n')
+          old="**Status: build and compatibility verification in progress. No finished x86 binary is claimed yet.**"
+          assert old in s
+          s=s.replace(old,"**Status: installable Codex 0.160.0 x86 Release built and verified. Physical-device testing remains required.**")
+          s=s.replace("**Use this only after an installable Release appears.**", "Install the verified latest Release.")
+          url=f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          s += f"\n## Published verification\n\n[Release verification]({url}) passed static ELF32/no-interpreter/no-shared-library checks, all file checksums, native Linux direct shell loops for GPT-6-Luna/Sol/6.1-Sol/Astra, the same loops in unmodified standard iSH 494 on Darwin ARM64, app-server pipe and PTY output/exit tests, and installation followed by plain codex startup in fresh bash and ash login shells. The binaries came from source build 36941651734. All four executable hashes were preserved while packaging this guide. Model responses were mocked; physical iOS authentication, live model tool choice, interactive operation, performance and background behavior remain unverified. Commands have guest file and network access.\n"
+          p.write_text(s)
+          PYTHON
+          cp package/README.md README.md
+          (cd package && sha256sum -c "$RUNNER_TEMP/executables.sha256")
+          (cd package && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          tar -czf codex-ish-x86.tar.gz -C package .
+          sha256sum codex-ish-x86.tar.gz > codex-ish-x86.tar.gz.sha256
+      - name: Publish verified installation archive and checksum
+        run: |
+          gh release create ish-x86-v0.160.0-r36941651734             codex-ish-x86.tar.gz codex-ish-x86.tar.gz.sha256 --repo "$GITHUB_REPOSITORY"             --target ed3b3acfd92912e808a562017d1342c1110654cd             --title 'Codex 0.160.0 for App Store iSH, 32-bit x86'             --notes 'Actual pinned OpenAI source, static ELF32 binaries with verified checksums. Passed native Linux and unmodified standard iSH Darwin ARM64 direct shell/tool loops for GPT-6-Luna, Sol, 6.1-Sol and Astra, pipe/PTY tests and one-command setup/startup tests. Model responses were mocked; physical iOS authentication and performance remain to be tested. No iOS background fix is claimed. Commands can access guest files and network. See the packaged README.' --latest
+      - name: Update repository installation status and actual verification results
+        run: |
+          python3 - "$README_SHA" > "$RUNNER_TEMP/readme-update.json" <<'PYTHON'
+          import base64,json,sys
+          from pathlib import Path
+          print(json.dumps({'message':'Document verified x86 Release and installation [skip ci]', 'sha':sys.argv[1], 'content':base64.b64encode(Path('README.md').read_bytes()).decode()}))
+          PYTHON
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/README.md" --input "$RUNNER_TEMP/readme-update.json" --silent
+      - uses: actions/upload-artifact@v4
+        with:
+          name: final-codex-ish-x86
+          path: |
+            codex-ish-x86.tar.gz
+            codex-ish-x86.tar.gz.sha256
