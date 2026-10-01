@@ -50,6 +50,30 @@ new = """        } else {
             // Safety: pidfd_open returns -1 on error or a valid fd with ownership."""
 assert s.count(old) == 1
 pidfd.write_text(s.replace(old, new))
+s = pidfd.read_text()
+anchor = "        // Safety: The following function calls invovkes syscall pidfd_open,"
+assert s.count(anchor) == 1
+s = s.replace(anchor, """        // Standard iSH raises SIGSYS for missing pidfd_open rather than
+        // returning ENOSYS. Detect its kernel before making that syscall.
+        // Real Linux keeps the normal pidfd path, including the waitid probe.
+        static IS_ISH: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let is_ish = *IS_ISH.get_or_init(|| {
+            let mut uts = std::mem::MaybeUninit::<libc::utsname>::zeroed();
+            if unsafe { libc::uname(uts.as_mut_ptr()) } != 0 {
+                return false;
+            }
+            let uts = unsafe { uts.assume_init() };
+            unsafe { std::ffi::CStr::from_ptr(uts.release.as_ptr()) }
+                .to_bytes()
+                .ends_with(b"-ish")
+        });
+        if is_ish {
+            NO_PIDFD_SUPPORT.store(true, Relaxed);
+            return None;
+        }
+
+""" + anchor)
+pidfd.write_text(s)
 
 manifest = root / "codex-rs/Cargo.toml"
 s = manifest.read_text()
@@ -104,6 +128,7 @@ info_path = compat / "PATCHINFO.json"
 info = json.loads(info_path.read_text())
 info["target"] = "i686-unknown-linux-musl"
 info["blake3_features"] = ["pure"]
+info["standard_ish_pidfd_policy"] = "uname release suffix -ish selects SIGCHLD before pidfd_open"
 info["omitted_executables"] = ["codex-code-mode-host"]
 info["patched_source_sha256"][str(openssl.relative_to(root))] = hashlib.sha256(openssl.read_bytes()).hexdigest()
 info_path.write_text(json.dumps(info, indent=2) + "\n")

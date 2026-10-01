@@ -6,6 +6,7 @@
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
 int main(void) {
@@ -15,6 +16,12 @@ int main(void) {
     pid_t child = fork();
     if (child < 0) { perror("fork"); return 1; }
     if (child == 0) { sleep(2); _exit(0); }
+    struct utsname uts;
+    int ish = uname(&uts) == 0 && strlen(uts.release) >= 4 &&
+        strcmp(uts.release + strlen(uts.release) - 4, "-ish") == 0;
+    if (ish) {
+        printf("pidfd_open: skipped on iSH (missing syscall raises SIGSYS); use SIGCHLD\n");
+    } else {
     errno = 0;
     int fd = syscall(SYS_pidfd_open, child, 0);
     printf("pidfd_open: %d errno=%d (%s)\n", fd, errno, strerror(errno));
@@ -23,6 +30,7 @@ int main(void) {
         rc = waitid(P_PIDFD, (id_t)fd, &info, WEXITED | WNOHANG | WNOWAIT);
         printf("waitid(P_PIDFD): %d errno=%d (%s)\n", rc, errno, strerror(errno));
         close(fd);
+    }
     }
     int status;
     if (waitpid(child, &status, 0) < 0) { perror("waitpid"); return 1; }

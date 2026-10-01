@@ -70,14 +70,29 @@ RS
 # Test-only syscall shim. The Release executables never load this library.
 cat > "$work/shim.c" <<'C'
 #define _GNU_SOURCE
+#include <dlfcn.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
+int uname(struct utsname *uts) {
+    const char *mode = getenv("ISH_TEST_MODE");
+    if (mode && strcmp(mode,"ish")==0) {
+        memset(uts,0,sizeof(*uts));
+        strcpy(uts->sysname,"Linux");
+        strcpy(uts->release,"4.20.69-ish");
+        const char marker[]="PASS: injected standard iSH kernel identity\n";
+        write(STDERR_FILENO,marker,sizeof(marker)-1);
+        return 0;
+    }
+    int (*real_uname)(struct utsname *) = dlsym(RTLD_NEXT,"uname");
+    return real_uname(uts);
+}
 int prctl(int option, ...) {
     const char *mode = getenv("ISH_TEST_MODE");
     if (option == PR_SET_PDEATHSIG && mode && strcmp(mode,"einval")==0) { errno=EINVAL; return -1; }
@@ -90,6 +105,11 @@ int prctl(int option, ...) {
 }
 int waitid(idtype_t type, id_t id, siginfo_t *info, int options) {
     const char *mode=getenv("ISH_TEST_MODE");
+    if (type==P_PIDFD && mode && strcmp(mode,"ish")==0) {
+        const char marker[]="FAIL: iSH kernel selected the pidfd reaper\n";
+        write(STDERR_FILENO,marker,sizeof(marker)-1);
+        _exit(90);
+    }
     if (type==P_PIDFD && mode && strcmp(mode,"einval")==0) {
         const char marker[]="PASS: injected waitid(P_PIDFD) EINVAL\n";
         write(STDERR_FILENO,marker,sizeof(marker)-1);
@@ -98,9 +118,17 @@ int waitid(idtype_t type, id_t id, siginfo_t *info, int options) {
     return syscall(SYS_waitid,type,id,info,options,0);
 }
 C
-cc -shared -fPIC -O2 "$work/shim.c" -o "$work/shim.so"
+cc -shared -fPIC -O2 "$work/shim.c" -o "$work/shim.so" -ldl
 cargo build --manifest-path "$work/harness/Cargo.toml" -j 1
 "$work/harness/target/debug/ish-subprocess-verification"
 ISH_TEST_MODE=einval LD_PRELOAD="$work/shim.so" "$work/harness/target/debug/ish-subprocess-verification" 2>&1 | tee "$work/einval.log"
 grep -Fxq 'PASS: injected waitid(P_PIDFD) EINVAL' "$work/einval.log"
 ISH_TEST_MODE=eperm LD_PRELOAD="$work/shim.so" "$work/harness/target/debug/ish-subprocess-verification"
+ISH_TEST_MODE=ish LD_PRELOAD="$work/shim.so" "$work/harness/target/debug/ish-subprocess-verification" 2>&1 | tee "$work/ish.log"
+grep -Fxq 'PASS: injected standard iSH kernel identity' "$work/ish.log"
+if [[ -n "${ISH_X86_HARNESS_OUT:-}" ]]; then
+  CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_LINKER="$repo_root/build-tools/zigcc" \
+  CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_RUSTFLAGS='-C link-self-contained=no -C target-cpu=pentium4' \
+    cargo build --manifest-path "$work/harness/Cargo.toml" --release --target i686-unknown-linux-musl -j 1
+  cp "$work/harness/target/i686-unknown-linux-musl/release/ish-subprocess-verification" "$ISH_X86_HARNESS_OUT"
+fi
