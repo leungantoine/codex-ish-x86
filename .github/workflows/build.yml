@@ -9,12 +9,17 @@ on:
       - patches/**
       - tests/**
       - setup.sh
+      - licenses/**
 permissions:
   contents: read
 jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
+    env:
+      CARGO_BUILD_JOBS: '1'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
     steps:
       - uses: actions/checkout@v4
       - name: Fetch and patch pinned real Codex source
@@ -27,7 +32,7 @@ jobs:
         with:
           toolchain: '1.95.0'
           targets: i686-unknown-linux-musl
-          components: rustfmt, clippy
+          components: rustfmt, clippy, rust-src
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.14.0
@@ -58,7 +63,7 @@ jobs:
           tool: just,cargo-nextest,uv,dotslash
       - name: Format and test patched PTY sources
         run: |
-          (cd upstream && just fmt && just test -p codex-utils-pty)
+          (cd upstream && just fmt && just test -p codex-utils-pty && just test -p codex-linux-sandbox --lib)
           ISH_PATCHED_SOURCE="$PWD/upstream" bash tests/verify-subprocess.sh
           python3 scripts/record-patchinfo.py upstream
       - name: Verify the 32-bit Rust and Zig linker before the full build
@@ -104,16 +109,54 @@ jobs:
   verify:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: codex-ish-x86
-      - name: Build unmodified released standard iSH
+      - name: Verify actual native ELF32 direct model tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y meson ninja-build clang lld llvm libarchive-dev libsqlite3-dev zlib1g-dev
+          sha256sum -c codex-ish-x86.tar.gz.sha256
+          mkdir package
+          tar -xzf codex-ish-x86.tar.gz -C package
+          (cd package && sha256sum -c SHA256SUMS)
+          for model in gpt-6-luna gpt-6-sol gpt-6.1-sol gpt-6-astra; do
+            python3 tests/reproduce-direct-model.py "linux-x86-$model" "$PWD/package/compat/models-direct.json" "$model" "$PWD/package/codex"
+          done
+      - name: Verify one-command setup and fresh startup PATH
+        run: |
+          # Run actual ELF32 binaries natively on the x86_64 builder for the installer check.
+          # Only uname -m is overridden; all executable and checksum checks are real.
+          mkdir "$RUNNER_TEMP/x86-uname"
+          printf '#!/bin/sh\nif [ "$1" = -m ]; then echo i686; else /usr/bin/uname "$@"; fi\n' > "$RUNNER_TEMP/x86-uname/uname"
+          chmod +x "$RUNNER_TEMP/x86-uname/uname"
+          PATH="$RUNNER_TEMP/x86-uname:$PATH" CODEX_ISH_RELEASE_BASE="file://$PWD" sh setup.sh
+          env -i HOME="$HOME" PATH=/usr/bin:/bin /bin/bash --login -c 'command -v codex; codex --version'
+          python3 tests/reproduce-direct-model.py setup-x86 "$PWD/package/compat/models-direct.json" gpt-6-luna "$HOME/.local/bin/codex"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-x86-tool-logs
+          path: '*-stderr.log'
+  verify-ish:
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: codex-ish-x86
+      - name: Build unmodified released standard iSH Darwin ARM64 backend
+        run: |
+          brew install meson ninja llvm lld libarchive pkg-config coreutils
+          export PATH="$(brew --prefix llvm)/bin:$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+          export PKG_CONFIG_PATH="$(brew --prefix libarchive)/lib/pkgconfig"
+          hostname
+          sudo hostname ish-x86-test
           git clone --depth 1 --branch builds/494 https://github.com/ish-app/ish.git emulator
           test "$(git -C emulator rev-parse HEAD)" = 216cf98a7cda1d68221add374630ede00aae9cd4
           git -C emulator submodule update --init --depth 1 deps/libapps
@@ -121,6 +164,7 @@ jobs:
           ninja -C emulator/build -j 2 ish tools/fakefsify
       - name: Prepare checksum verified x86 Alpine guest and release
         run: |
+          export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
           sha256sum -c codex-ish-x86.tar.gz.sha256
           mkdir package root
           tar -xzf codex-ish-x86.tar.gz -C package
@@ -146,35 +190,27 @@ jobs:
           '
       - name: Version and syscall checks in standard iSH
         run: |
+          export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
           timeout 120 emulator/build/ish -f guest /codex/codex --version | grep -Fx 'codex-cli 0.160.0'
           timeout 120 emulator/build/ish -f guest /codex/diagnostics/ish-syscall-probe
-      - name: Real model tool requests and subprocess roundtrips
+      - name: Real model tool requests and subprocess roundtrips in standard iSH
         run: |
+          export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+          ulimit -n 4096
           for model in gpt-6-luna gpt-6-sol gpt-6.1-sol gpt-6-astra; do
-            python3 tests/reproduce-direct-model.py "linux-x86-$model" "$PWD/package/compat/models-direct.json" "$model" "$PWD/package/codex"
             timeout 300 python3 tests/reproduce-direct-model.py "ish-x86-$model" /codex/compat/models-direct.json "$model" emulator/build/ish -f guest /codex/codex
           done
           timeout 300 python3 tests/reproduce-ish.py ish-x86 emulator/build/ish -f guest /codex/codex --no-daemon --disable code_mode_host -c 'sandbox_mode="danger-full-access"' app-server --stdio
-      - name: Verify one-command setup and fresh startup PATH
-        run: |
-          # Run actual ELF32 binaries natively on the x86_64 builder for the installer check.
-          # Only uname -m is overridden; all executable and checksum checks are real.
-          mkdir "$RUNNER_TEMP/x86-uname"
-          printf '#!/bin/sh\nif [ "$1" = -m ]; then echo i686; else /usr/bin/uname "$@"; fi\n' > "$RUNNER_TEMP/x86-uname/uname"
-          chmod +x "$RUNNER_TEMP/x86-uname/uname"
-          PATH="$RUNNER_TEMP/x86-uname:$PATH" CODEX_ISH_RELEASE_BASE="file://$PWD" sh setup.sh
-          env -i HOME="$HOME" PATH=/usr/bin:/bin /bin/bash --login -c 'command -v codex; codex --version'
-          python3 tests/reproduce-direct-model.py setup-x86 "$PWD/package/compat/models-direct.json" gpt-6-luna "$HOME/.local/bin/codex"
       - name: Print app-server errors if verification fails
         if: failure()
-        run: tail -40 ish-x86-stderr.log || true
+        run: tail -80 ish-x86*-stderr.log || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: x86-subprocess-logs
+          name: standard-ish-x86-tool-logs
           path: '*-stderr.log'
   publish:
-    needs: verify
+    needs: [verify, verify-ish]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:

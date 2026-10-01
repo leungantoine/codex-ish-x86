@@ -19,16 +19,17 @@ export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=2
 export GITHUB_ENV=$(mktemp)
 trap 'rm -f "$GITHUB_ENV"' EXIT
 cd "$source_root"
+python3 "$kit/scripts/prepare-rust-std.py" "$source_root/ish-compat"
 OPENSSL_CC="$CC" OPENSSL_BUILD_JOBS=2 bash .github/scripts/install-musl-openssl.sh
 set -a
 source "$GITHUB_ENV"
 set +a
 # Select the actual CLI and proxy; the separate V8 host is not built.
-cargo build --manifest-path codex-rs/Cargo.toml --locked --release --target "$TARGET" -j 1 \
+RUSTC_BOOTSTRAP=1 cargo -Z build-std=std,panic_abort build --manifest-path codex-rs/Cargo.toml --locked --release --target "$TARGET" -j 1 \
   --bin codex --bin codex-responses-api-proxy
-cargo install ripgrep --version 15.2.0 --locked --target "$TARGET" --root "$RUNNER_TEMP/rg-x86" -j 1
+RUSTC_BOOTSTRAP=1 cargo -Z build-std=std,panic_abort install ripgrep --version 15.2.0 --locked --target "$TARGET" --root "$RUNNER_TEMP/rg-x86" -j 1
 package="$kit/dist/codex-ish-x86"
-mkdir -p "$package"/{codex-path,codex-resources,diagnostics,compat,licenses/ripgrep}
+mkdir -p "$package"/{codex-path,codex-resources,diagnostics,compat,licenses/ripgrep,licenses/rust}
 for name in codex codex-responses-api-proxy; do
   install -m 0755 "codex-rs/target/$TARGET/release/$name" "$package/$name"
 done
@@ -36,9 +37,11 @@ install -m 0755 "$RUNNER_TEMP/rg-x86/bin/rg" "$package/codex-path/rg"
 "$CC" -O2 -static "$kit/tests/ish-syscall-probe.c" -o "$package/diagnostics/ish-syscall-probe"
 cp "$kit/tests/ish-syscall-probe.c" "$package/diagnostics/"
 cp ish-compat/*.json "$package/compat/"
+cp ish-compat/rust-std.patch "$package/compat/"
 cp LICENSE NOTICE "$package/"
 cp "$kit/README.md" "$package/README.md"
 cp "$kit/setup.sh" "$package/setup.sh"
+cp "$kit/licenses/rust/"* "$package/licenses/rust/"
 rg_source=$(find "$HOME/.cargo/registry/src" -type d -name ripgrep-15.2.0 -print -quit)
 for name in COPYING LICENSE-MIT UNLICENSE; do cp "$rg_source/$name" "$package/licenses/ripgrep/"; done
 cat > "$package/BUILDINFO" <<INFO
@@ -49,6 +52,8 @@ Rust: $(rustc --version)
 Zig: $(zig version)
 OpenSSL: 3.6.4, upstream SHA-256 verified, portable C, static musl
 Ripgrep: 15.2.0, built from its locked source crate
+Rust std: rebuilt from exact 1.95.0 source; iSH socket error-channel, sleep and ENOSYS futex fallbacks
+BLAKE3: upstream pure feature, AVX-512 C backend omitted
 Direct tools; no V8 host, daemon, or Linux sandbox support in standard iSH.
 Physical iOS authentication, performance, and background behavior require device tests.
 INFO
