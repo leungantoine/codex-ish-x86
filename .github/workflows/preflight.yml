@@ -19,6 +19,9 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.14.0
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest,uv,dotslash
       - name: Compile static Rust and diagnostic probes
         run: |
           chmod +x build-tools/*
@@ -46,6 +49,12 @@ jobs:
           build-tools/zigcc -O2 -static tests/ish-syscall-probe.c -o root/syscall-probe
           readelf -h root/preflight | grep -q 'Class:.*ELF32'
           readelf -h root/preflight | grep -q 'Machine:.*Intel 80386'
+      - name: Test actual patched Tokio and prepare its ELF32 subprocess harness
+        run: |
+          git clone --depth 1 --branch rust-v0.160.0 https://github.com/openai/codex.git upstream
+          python3 scripts/prepare-source.py upstream
+          (cd upstream && just fmt)
+          ISH_PATCHED_SOURCE="$PWD/upstream" ISH_X86_HARNESS_OUT="$PWD/root/tokio-probe" bash tests/verify-subprocess.sh
       - name: Build unmodified standard iSH 1.3.2 source
         run: |
           sudo apt-get update
@@ -79,6 +88,7 @@ jobs:
           ' 2>>runtime-stderr.log
           timeout 120 emulator/build/ish -f guest /bin/sh -c 'printf "guest-shell-ok\\n"; ls -l /bin/sh /bin/busybox /lib/ld-musl-i386.so.1' 2>>runtime-stderr.log
           timeout 120 emulator/build/ish -f guest /preflight 2>>runtime-stderr.log
+          timeout 120 emulator/build/ish -f guest /tokio-probe 2>>runtime-stderr.log
           timeout 120 emulator/build/ish -f guest /syscall-probe 2>>runtime-stderr.log
       - name: Print runtime failure detail
         if: failure()
@@ -88,4 +98,3 @@ jobs:
         with:
           name: x86-runtime-preflight-logs
           path: '*-stderr.log'
-
