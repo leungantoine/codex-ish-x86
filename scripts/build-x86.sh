@@ -2,17 +2,17 @@
 set -euo pipefail
 kit=$(cd "$(dirname "$0")/.." && pwd)
 source_root=$(cd "${1:?upstream source directory required}" && pwd)
-export TARGET=i586-unknown-linux-musl
+export TARGET=i686-unknown-linux-musl
 export RUNNER_TEMP="${RUNNER_TEMP:-/tmp}"
 export CC="$kit/build-tools/zigcc" CXX="$kit/build-tools/zigcxx"
-export CC_i586_unknown_linux_musl="$CC" CXX_i586_unknown_linux_musl="$CXX"
-export CARGO_TARGET_I586_UNKNOWN_LINUX_MUSL_LINKER="$CC"
-export CARGO_TARGET_I586_UNKNOWN_LINUX_MUSL_RUSTFLAGS='-C link-self-contained=no -C target-cpu=pentium'
+export CC_i686_unknown_linux_musl="$CC" CXX_i686_unknown_linux_musl="$CXX"
+export CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_LINKER="$CC"
+export CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_RUSTFLAGS='-C link-self-contained=no -C target-cpu=pentium4'
 export TARGET_CC="$CC" TARGET_CXX="$CXX"
 export CMAKE_C_COMPILER="$CC" CMAKE_CXX_COMPILER="$CXX"
 export CFLAGS='-pthread -Wno-error=frame-larger-than'
 export CXXFLAGS="$CFLAGS"
-export AWS_LC_SYS_NO_JITTER_ENTROPY=1 AWS_LC_SYS_NO_JITTER_ENTROPY_i586_unknown_linux_musl=1
+export AWS_LC_SYS_NO_JITTER_ENTROPY=1 AWS_LC_SYS_NO_JITTER_ENTROPY_i686_unknown_linux_musl=1
 export PKG_CONFIG_ALLOW_CROSS=1
 export CARGO_BUILD_JOBS=1 CARGO_PROFILE_RELEASE_DEBUG=0 CARGO_PROFILE_RELEASE_LTO=off
 export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=2
@@ -55,4 +55,3 @@ INFO
 (cd "$package" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 tar -czf "$kit/dist/codex-ish-x86.tar.gz" -C "$package" .
 (cd "$kit/dist" && sha256sum codex-ish-x86.tar.gz > codex-ish-x86.tar.gz.sha256)
-

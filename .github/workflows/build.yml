@@ -26,7 +26,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: '1.95.0'
-          targets: i586-unknown-linux-musl
+          targets: i686-unknown-linux-musl
           components: rustfmt, clippy
       - uses: mlugg/setup-zig@v2
         with:
@@ -64,7 +64,7 @@ jobs:
       - name: Verify the 32-bit Rust and Zig linker before the full build
         run: |
           printf 'fn main() { println!("x86-link-ok"); }\n' > "$RUNNER_TEMP/link.rs"
-          rustc --edition 2024 --target i586-unknown-linux-musl -C target-cpu=pentium \
+          rustc --edition 2024 --target i686-unknown-linux-musl -C target-cpu=pentium4 \
             -C linker="$PWD/build-tools/zigcc" -C link-self-contained=no \
             "$RUNNER_TEMP/link.rs" -o "$RUNNER_TEMP/link"
           readelf -h "$RUNNER_TEMP/link" | grep -q 'Class:.*ELF32'

@@ -9,8 +9,8 @@ This repository ports **OpenAI's real Codex CLI** to standard [App Store iSH](ht
 - OpenAI stable tag: `rust-v0.160.0`
 - Exact source commit: `a956835d020762cb2b570053af06f643a11c0ecc`
 - Rust: `1.95.0`
-- Target: `i586-unknown-linux-musl` (ELF32 Intel 80386)
-- C/C++ cross compiler: Zig `0.14.0`, x86 musl, Pentium baseline
+- Target: `i686-unknown-linux-musl` (ELF32 Intel 80386)
+- C/C++ cross compiler: Zig `0.14.0`, x86 musl, Pentium 4 / SSE2 baseline
 - OpenSSL: upstream installer's checksum-pinned `3.6.4`, extended to `linux-generic32`, static portable C
 - Ripgrep: `15.2.0`, compiled from its locked source crate for the same target
 
@@ -109,3 +109,7 @@ codex --version
 ## Maintenance
 
 Inspect the pinned upstream source and dependencies before upgrading. Recreate only still-needed compatibility patches, refresh the matching model catalog, dependency lock metadata and input hashes, compile actual binaries, repeat the verification gates, and then publish. Follow `AGENTS.md` here and in upstream. This is an independent compatibility port, not an official OpenAI or iSH distribution.
+
+### Current compilation finding
+
+The first full attempt compiled static OpenSSL and initial Rust dependencies, then `ring` 0.17.14 rejected the i586 target because it requires SSE/SSE2. The port now uses the canonical i686 musl target with a Pentium 4 / SSE2 baseline. This does not establish emulator compatibility; execution in released standard iSH remains a publication gate.

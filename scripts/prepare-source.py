@@ -91,14 +91,14 @@ openssl = root / ".github/scripts/install-musl-openssl.sh"
 s = openssl.read_text()
 anchor = '  x86_64-unknown-linux-musl) openssl_target="linux-x86_64" ;;'
 assert s.count(anchor) == 1
-s = s.replace(anchor, '  i586-unknown-linux-musl) openssl_target="linux-generic32" ;;\n' + anchor)
+s = s.replace(anchor, '  i686-unknown-linux-musl) openssl_target="linux-generic32" ;;\n' + anchor)
 # Use portable C for OpenSSL in the x86 guest.
 s = s.replace('no-shared no-module no-tests', 'no-asm no-shared no-module no-tests')
 openssl.write_text(s)
 
 info_path = compat / "PATCHINFO.json"
 info = json.loads(info_path.read_text())
-info["target"] = "i586-unknown-linux-musl"
+info["target"] = "i686-unknown-linux-musl"
 info["omitted_executables"] = ["codex-code-mode-host"]
 info["patched_source_sha256"][str(openssl.relative_to(root))] = hashlib.sha256(openssl.read_bytes()).hexdigest()
 info_path.write_text(json.dumps(info, indent=2) + "\n")
