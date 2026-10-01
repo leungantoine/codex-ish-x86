@@ -1,0 +1,183 @@
+name: Build and verify Codex for standard iSH
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/build.yml
+      - scripts/**
+      - build-tools/**
+      - patches/**
+      - tests/**
+      - setup.sh
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch and patch pinned real Codex source
+        run: |
+          git clone --depth 1 --branch rust-v0.160.0 https://github.com/openai/codex.git upstream
+          test "$(git -C upstream rev-parse HEAD)" = a956835d020762cb2b570053af06f643a11c0ecc
+          python3 scripts/prepare-source.py upstream
+          chmod +x build-tools/* scripts/*.sh
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95.0'
+          targets: i586-unknown-linux-musl
+          components: rustfmt, clippy
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.0
+      - name: Prepare compiler and memory headroom
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends perl make cmake pkg-config clang libclang-dev qemu-user-static binutils file
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          free_kib=$(df -Pk /mnt | awk 'NR == 2 {print $4}')
+          swap_mib=$((free_kib / 1024 - 10000))
+          if ((swap_mib > 8192)); then swap_mib=8192; fi
+          if ((swap_mib >= 2048)); then
+            sudo fallocate -l "${swap_mib}M" /mnt/codex-x86-swap
+            sudo chmod 600 /mnt/codex-x86-swap
+            sudo mkswap /mnt/codex-x86-swap
+            sudo swapon /mnt/codex-x86-swap
+          fi
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            upstream/codex-rs/target
+          key: ish-x86-1600-rust195-zig014-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ish-x86-1600-rust195-zig014-
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest,uv,dotslash
+      - name: Format and test patched PTY sources
+        run: |
+          (cd upstream && just fmt && just test -p codex-utils-pty)
+          ISH_PATCHED_SOURCE="$PWD/upstream" bash tests/verify-subprocess.sh
+          python3 scripts/record-patchinfo.py upstream
+      - name: Verify the 32-bit Rust and Zig linker before the full build
+        run: |
+          printf 'fn main() { println!("x86-link-ok"); }\n' > "$RUNNER_TEMP/link.rs"
+          rustc --edition 2024 --target i586-unknown-linux-musl -C target-cpu=pentium \
+            -C linker="$PWD/build-tools/zigcc" -C link-self-contained=no \
+            "$RUNNER_TEMP/link.rs" -o "$RUNNER_TEMP/link"
+          readelf -h "$RUNNER_TEMP/link" | grep -q 'Class:.*ELF32'
+          readelf -h "$RUNNER_TEMP/link" | grep -q 'Machine:.*Intel 80386'
+          qemu-i386-static "$RUNNER_TEMP/link" | grep -Fx x86-link-ok
+      - name: Cross-build actual CLI and package resources
+        run: bash scripts/build-x86.sh upstream
+      - name: Verify static ELF32 architecture, checksums and actual version
+        run: |
+          for name in codex codex-responses-api-proxy codex-path/rg diagnostics/ish-syscall-probe; do
+            path="dist/codex-ish-x86/$name"
+            file "$path"
+            readelf -h "$path" | grep -q 'Class:.*ELF32'
+            readelf -h "$path" | grep -q 'Machine:.*Intel 80386'
+            if readelf -l "$path" | grep -q INTERP; then exit 1; fi
+            if readelf -d "$path" | grep -q '(NEEDED)'; then exit 1; fi
+          done
+          (cd dist/codex-ish-x86 && sha256sum -c SHA256SUMS)
+          qemu-i386-static dist/codex-ish-x86/codex --version | grep -Fx 'codex-cli 0.160.0'
+          qemu-i386-static dist/codex-ish-x86/codex-path/rg --version
+          qemu-i386-static dist/codex-ish-x86/diagnostics/ish-syscall-probe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-ish-x86
+          path: |
+            dist/codex-ish-x86.tar.gz
+            dist/codex-ish-x86.tar.gz.sha256
+          if-no-files-found: error
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            upstream/codex-rs/target
+          key: ish-x86-1600-rust195-zig014-${{ github.run_id }}-${{ github.run_attempt }}
+  verify:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: codex-ish-x86
+      - name: Build unmodified released standard iSH
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build clang lld llvm libarchive-dev libsqlite3-dev zlib1g-dev
+          git clone --depth 1 --branch builds/494 https://github.com/ish-app/ish.git emulator
+          test "$(git -C emulator rev-parse HEAD)" = 216cf98a7cda1d68221add374630ede00aae9cd4
+          git -C emulator submodule update --init --depth 1 deps/libapps
+          CC=clang meson setup emulator/build emulator --buildtype=debugoptimized -Dlog=strace
+          ninja -C emulator/build -j 2 ish tools/fakefsify
+      - name: Prepare checksum verified x86 Alpine guest and release
+        run: |
+          sha256sum -c codex-ish-x86.tar.gz.sha256
+          mkdir package root
+          tar -xzf codex-ish-x86.tar.gz -C package
+          (cd package && sha256sum -c SHA256SUMS)
+          base=https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86
+          curl -fsSL "$base/alpine-minirootfs-3.23.3-x86.tar.gz" -o alpine.tar.gz
+          curl -fsSL "$base/alpine-minirootfs-3.23.3-x86.tar.gz.sha256" -o alpine.sha256
+          test "$(sha256sum alpine.tar.gz | cut -d ' ' -f1)" = "$(cut -d ' ' -f1 alpine.sha256)"
+          tar -xzf alpine.tar.gz -C root
+          cp -a package root/codex
+          tar -czf guest.tar.gz -C root .
+          emulator/build/tools/fakefsify guest.tar.gz guest
+      - name: Version and syscall checks in standard iSH
+        run: |
+          timeout 120 emulator/build/ish -f guest /codex/codex --version | grep -Fx 'codex-cli 0.160.0'
+          timeout 120 emulator/build/ish -f guest /codex/diagnostics/ish-syscall-probe
+      - name: Real model tool requests and subprocess roundtrips
+        run: |
+          for model in gpt-6-luna gpt-6-sol gpt-6.1-sol gpt-6-astra; do
+            python3 tests/reproduce-direct-model.py "linux-x86-$model" "$PWD/package/compat/models-direct.json" "$model" "$PWD/package/codex"
+            timeout 300 python3 tests/reproduce-direct-model.py "ish-x86-$model" /codex/compat/models-direct.json "$model" emulator/build/ish -f guest /codex/codex
+          done
+          timeout 300 python3 tests/reproduce-ish.py ish-x86 emulator/build/ish -f guest /codex/codex --no-daemon --disable code_mode_host -c 'sandbox_mode="danger-full-access"' app-server --stdio
+      - name: Verify one-command setup and fresh startup PATH
+        run: |
+          # Run actual ELF32 binaries natively on the x86_64 builder for the installer check.
+          # Only uname -m is overridden; all executable and checksum checks are real.
+          mkdir "$RUNNER_TEMP/x86-uname"
+          printf '#!/bin/sh\nif [ "$1" = -m ]; then echo i686; else /usr/bin/uname "$@"; fi\n' > "$RUNNER_TEMP/x86-uname/uname"
+          chmod +x "$RUNNER_TEMP/x86-uname/uname"
+          PATH="$RUNNER_TEMP/x86-uname:$PATH" CODEX_ISH_RELEASE_BASE="file://$PWD" sh setup.sh
+          env -i HOME="$HOME" PATH=/usr/bin:/bin /bin/bash --login -c 'command -v codex; codex --version'
+          python3 tests/reproduce-direct-model.py setup-x86 "$PWD/package/compat/models-direct.json" gpt-6-luna "$HOME/.local/bin/codex"
+      - name: Print app-server errors if verification fails
+        if: failure()
+        run: tail -40 ish-x86-stderr.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: x86-subprocess-logs
+          path: '*-stderr.log'
+  publish:
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: codex-ish-x86
+      - name: Publish only the verified real binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum -c codex-ish-x86.tar.gz.sha256
+          gh release create "ish-x86-v0.160.0-${GITHUB_RUN_NUMBER}" \
+            codex-ish-x86.tar.gz codex-ish-x86.tar.gz.sha256 --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title 'Codex 0.160.0 for standard iSH, 32-bit x86' \
+            --notes 'Real OpenAI source a956835d020762cb2b570053af06f643a11c0ecc. Static ELF32 musl CLI, proxy, ripgrep and diagnostics. Direct GPT-6/GPT-6.1 tools; no V8 host or daemon. Passed static architecture/checksum checks, QEMU version, patched native fallback tests and real shell/tool roundtrips in unmodified standard iSH release 494. Model responses were mocked; physical iOS login and performance remain to be tested. Commands can access guest files and network. See README for setup and verification limits.' --latest

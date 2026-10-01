@@ -1,0 +1,52 @@
+name: Verify x86 source dependency metadata
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/verify-upgrade-inputs.yml
+permissions:
+  contents: read
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare exact upgraded source
+        run: |
+          git clone --depth 1 --branch rust-v0.160.0 https://github.com/openai/codex.git upstream
+          python3 scripts/prepare-source.py upstream
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95.0'
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86
+        with:
+          bazelisk-version: 1.28.1
+      - name: Refresh upstream Bazel dependency lock
+        working-directory: upstream
+        run: |
+          cargo metadata --manifest-path codex-rs/Cargo.toml --format-version 1 > /dev/null
+          just bazel-lock-update
+          git diff -- MODULE.bazel.lock > ../bazel-dependency-lock.patch
+          cp MODULE.bazel.lock ../MODULE.bazel.lock
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x86-bazel-dependency-metadata
+          path: |
+            bazel-dependency-lock.patch
+            MODULE.bazel.lock
+      - name: Export lock patch for read-only review
+        run: |
+          python3 - <<'PY'
+          import base64
+          import gzip
+          from pathlib import Path
+          data = base64.b64encode(gzip.compress(Path("bazel-dependency-lock.patch").read_bytes())).decode()
+          print("CODEX_BAZEL_PATCH_BEGIN")
+          for offset in range(0, len(data), 2000):
+              print("CODEX_BAZEL_PATCH_DATA:" + data[offset:offset + 2000])
+          print("CODEX_BAZEL_PATCH_END")
+          PY

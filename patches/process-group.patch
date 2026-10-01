@@ -1,0 +1,17 @@
+--- a/codex-rs/utils/pty/src/process_group.rs
++++ b/codex-rs/utils/pty/src/process_group.rs
+@@ -28,7 +28,13 @@
+ /// avoid a race where the parent exits between fork and exec.
+ pub fn set_parent_death_signal(parent_pid: libc::pid_t) -> io::Result<()> {
+     if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) } == -1 {
+-        return Err(io::Error::last_os_error());
++        let error = io::Error::last_os_error();
++        if error.raw_os_error() == Some(libc::EINVAL) {
++            // PDEATHSIG was not armed. The parent PID guard would protect no
++            // race and can spuriously kill children under iSH worker threads.
++            return Ok(());
++        }
++        return Err(error);
+     }
+ 
+     if unsafe { libc::getppid() } != parent_pid {

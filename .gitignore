@@ -1,0 +1,8 @@
+upstream/
+emulator/
+dist/
+guest/
+root/
+*-stderr.log
+*.tar.gz
+*.crate
