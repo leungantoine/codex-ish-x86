@@ -70,9 +70,10 @@ Daemon mode, local V8 execution, and sandboxed Linux execution are unsupported. 
 ## Compatibility changes
 
 1. `utils/pty/src/process_group.rs`: if `prctl(PR_SET_PDEATHSIG, SIGTERM)` returns `EINVAL`, return success and skip the parent-PID guard because no death signal was armed. Normal Linux behavior is preserved and other errors propagate.
-2. Vendored Tokio `1.52.3`: after `pidfd_open`, probe `waitid(P_PIDFD)` with `WEXITED | WNOHANG | WNOWAIT`. On `EINVAL`, close the descriptor and use the existing SIGCHLD reaper. The download is verified against upstream's Cargo.lock checksum.
+2. Vendored Tokio `1.52.3`: a kernel release ending in `-ish` selects the existing SIGCHLD reaper before calling `pidfd_open`, because the App Store release raises `SIGSYS` for that missing syscall. Other Linux kernels retain the normal pidfd path. After `pidfd_open`, probe `waitid(P_PIDFD)` with `WEXITED | WNOHANG | WNOWAIT`. On `EINVAL`, close the descriptor and use the existing SIGCHLD reaper. The download is verified against upstream's Cargo.lock checksum.
 3. Extend upstream's OpenSSL installer to the 32-bit musl target and use portable C. No authentication or model inference code is replaced.
-4. Generate the direct catalog from the pinned source by changing only `tool_mode` for the seven existing GPT-6/GPT-6.1/GPT-5.6 entries. The command disables code mode and uses Codex's existing direct tools.
+4. Select BLAKE3's upstream `pure` feature to omit its AVX-512 C backend; no checksum or dependency version is changed.
+5. Generate the direct catalog from the pinned source by changing only `tool_mode` for the seven existing GPT-6/GPT-6.1/GPT-5.6 entries. The command disables code mode and uses Codex's existing direct tools.
 
 `scripts/prepare-source.py` checks the exact source commit before patching. `compat/PATCHINFO.json` in the archive records source, original Tokio checksum, catalog changes and final patched input hashes. Do not apply the ARM64 project's historical overlay to this source.
 
@@ -82,7 +83,7 @@ The workflow uses Ubuntu 24.04 x86_64, one Cargo build job, release optimization
 
 Required checks before publication:
 
-1. Native tests of the patched PTY crate and a subprocess harness exercising normal Linux, injected `EINVAL`, fatal `EPERM`, worker-thread spawning and child cleanup.
+1. Native tests of the patched PTY crate and a subprocess harness exercising normal Linux, injected `EINVAL`, fatal `EPERM`, injected iSH kernel identity, worker-thread spawning and child cleanup.
 2. A tiny static 32-bit Rust link test before the full compilation.
 3. All four executables must be ELF32 Intel 80386, with no `PT_INTERP` and no shared-library `DT_NEEDED` entries. Verify internal and outer checksums.
 4. QEMU version, ripgrep and syscall diagnostics checks.
@@ -113,3 +114,9 @@ Inspect the pinned upstream source and dependencies before upgrading. Recreate o
 ### Current compilation finding
 
 The first full attempt compiled static OpenSSL and initial Rust dependencies, then `ring` 0.17.14 rejected the i586 target because it requires SSE/SSE2. The port now uses the canonical i686 musl target with a Pentium 4 / SSE2 baseline. This does not establish emulator compatibility; execution in released standard iSH remains a publication gate.
+
+### Standard iSH runtime findings
+
+[Preflight run 36936566523](https://github.com/leungantoine/codex-ish-x86/actions/runs/36936566523) passed actual ELF32 Rust startup, clock, floating point, four worker threads, and real worker shell commands returning output and exit status 17 inside unmodified standard iSH 494. The minimal test root filesystem needed `/dev/null` and the other device nodes normally supplied by the iOS app. This test did not run a finished Codex binary.
+
+The same run's raw diagnostic probe then encountered `SIGSYS` on missing `pidfd_open` (syscall 434). The new Tokio kernel check avoids that call on iSH; a focused native and standard-iSH Tokio harness is testing this patch before the next full build. [Dependency metadata run 36936516270](https://github.com/leungantoine/codex-ish-x86/actions/runs/36936516270) passed with BLAKE3's `pure` feature; the regenerated Bazel lock patch was identical.
