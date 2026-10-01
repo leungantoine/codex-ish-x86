@@ -1,4 +1,4 @@
-name: Check 32-bit Rust and Tokio runtime in released standard iSH
+name: Check 32-bit Rust runtime with Darwin standard iSH
 on:
   workflow_dispatch:
   push:
@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 jobs:
-  runtime:
+  compile:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -57,10 +57,32 @@ jobs:
           (cd upstream && just fmt)
           python3 scripts/prepare-rust-std.py upstream/ish-compat
           ISH_PATCHED_SOURCE="$PWD/upstream" ISH_X86_HARNESS_OUT="$PWD/root/tokio-probe" bash tests/verify-subprocess.sh
-      - name: Build unmodified standard iSH 1.3.2 source
+      - name: Check rebuilt runtime on normal Linux under QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build clang lld llvm libarchive-dev libsqlite3-dev zlib1g-dev qemu-user-static
+          sudo apt-get install -y qemu-user-static
+          qemu-i386-static root/tokio-probe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x86-runtime-probes
+          path: root/*
+  runtime:
+    needs: compile
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: x86-runtime-probes
+          path: root
+      - name: Build unmodified released iSH with its Darwin and ARM64 backend
+        run: |
+          brew install meson ninja llvm lld libarchive pkg-config coreutils
+          export PATH="$(brew --prefix llvm)/bin:$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+          export PKG_CONFIG_PATH="$(brew --prefix libarchive)/lib/pkgconfig"
           git clone --depth 1 --branch builds/494 https://github.com/ish-app/ish.git emulator
           test "$(git -C emulator rev-parse HEAD)" = 216cf98a7cda1d68221add374630ede00aae9cd4
           git -C emulator submodule update --init --depth 1 deps/libapps
@@ -68,6 +90,9 @@ jobs:
           ninja -C emulator/build -j 2 ish tools/fakefsify
       - name: Run actual ELF32 programs through standard iSH
         run: |
+          export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+          ulimit -n 4096
+          chmod +x root/preflight root/tokio-probe root/syscall-probe
           base=https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86
           curl -fsSL "$base/alpine-minirootfs-3.23.3-x86.tar.gz" -o alpine.tar.gz
           curl -fsSL "$base/alpine-minirootfs-3.23.3-x86.tar.gz.sha256" -o alpine.sha256
@@ -79,7 +104,6 @@ jobs:
           # Initialize the same ordinary Alpine devices inside its fake filesystem.
           # Keep syscall tracing separate so it cannot overwrite a Rust panic.
           exec 666>runtime-strace.log
-          qemu-i386-static root/tokio-probe
           timeout 120 emulator/build/ish -f guest /bin/sh -ec '
             mknod -m 666 /dev/null c 1 3
             mknod -m 666 /dev/zero c 1 5
