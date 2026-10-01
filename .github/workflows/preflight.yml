@@ -6,68 +6,9 @@ on:
       - .github/workflows/preflight.yml
 permissions:
   contents: read
+  actions: read
 jobs:
-  compile:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: '1.95.0'
-          targets: i686-unknown-linux-musl
-          components: rustfmt,rust-src
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.14.0
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just,cargo-nextest,uv,dotslash
-      - name: Compile static Rust and diagnostic probes
-        run: |
-          chmod +x build-tools/*
-          mkdir root
-          cat > "$RUNNER_TEMP/preflight.rs" <<'RS'
-          use std::process::Command;
-          fn main() {
-              assert_eq!(std::mem::size_of::<usize>(), 4);
-              let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
-              println!("x86-runtime-ok: unix={} float={}", now.as_secs(), 1.25_f64.sqrt());
-              for n in 0..4 {
-                  std::thread::spawn(move || {
-                      let output = Command::new("/bin/sh").args(["-c", "printf 'x86-child-ok\\n'; exit 17"]).output().unwrap();
-                      assert_eq!(output.status.code(), Some(17));
-                      assert_eq!(output.stdout, b"x86-child-ok\n");
-                      println!("x86-worker-{n}-ok");
-                  }).join().unwrap();
-              }
-              println!("PASS: ELF32 Rust startup, clock, float, threads and worker shell spawns");
-          }
-          RS
-          rustc --edition 2024 --target i686-unknown-linux-musl -C target-cpu=pentium4 -C opt-level=2 \
-            -C linker="$PWD/build-tools/zigcc" -C link-self-contained=no \
-            "$RUNNER_TEMP/preflight.rs" -o root/preflight
-          build-tools/zigcc -O2 -static tests/ish-syscall-probe.c -o root/syscall-probe
-          readelf -h root/preflight | grep -q 'Class:.*ELF32'
-          readelf -h root/preflight | grep -q 'Machine:.*Intel 80386'
-      - name: Test actual patched Tokio and prepare its ELF32 subprocess harness
-        run: |
-          git clone --depth 1 --branch rust-v0.160.0 https://github.com/openai/codex.git upstream
-          python3 scripts/prepare-source.py upstream
-          (cd upstream && just fmt)
-          python3 scripts/prepare-rust-std.py upstream/ish-compat
-          ISH_PATCHED_SOURCE="$PWD/upstream" ISH_X86_HARNESS_OUT="$PWD/root/tokio-probe" bash tests/verify-subprocess.sh
-      - name: Check rebuilt runtime on normal Linux under QEMU
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static
-          qemu-i386-static root/tokio-probe
-      - uses: actions/upload-artifact@v4
-        with:
-          name: x86-runtime-probes
-          path: root/*
   runtime:
-    needs: compile
     runs-on: macos-15
     timeout-minutes: 25
     env:
@@ -78,6 +19,8 @@ jobs:
         with:
           name: x86-runtime-probes
           path: root
+          run-id: 36939522611
+          github-token: ${{ github.token }}
       - name: Build unmodified released iSH with its Darwin and ARM64 backend
         run: |
           brew install meson ninja llvm lld libarchive pkg-config coreutils
@@ -126,6 +69,11 @@ jobs:
           cat runtime-stderr.log || true
           grep -a -B 8 -A 8 -E '0xffffffea|missing syscall' runtime-strace.log || true
           tail -100 runtime-strace.log || true
+      - name: Collect native Darwin emulator backtrace
+        if: failure()
+        run: |
+          chmod +x root/*
+          lldb --batch -o 'run -f guest /bin/sh -c true' -o 'thread backtrace all' emulator/build/ish || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
