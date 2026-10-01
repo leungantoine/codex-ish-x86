@@ -102,3 +102,8 @@ info["target"] = "i586-unknown-linux-musl"
 info["omitted_executables"] = ["codex-code-mode-host"]
 info["patched_source_sha256"][str(openssl.relative_to(root))] = hashlib.sha256(openssl.read_bytes()).hexdigest()
 info_path.write_text(json.dumps(info, indent=2) + "\n")
+
+# Include the generated Bazel lock update in prepared source when available.
+bazel_patch = kit / "metadata/bazel-dependency-lock.patch"
+if bazel_patch.exists():
+    subprocess.run(["git", "apply", str(bazel_patch)], cwd=root, check=True)

@@ -3,6 +3,6 @@ set -euo pipefail
 args=(); skip=0
 for arg in "$@"; do
   if ((skip)); then skip=0; continue; fi
-  case "$arg" in --target|-target) skip=1;; --target=*|-target=*) ;; -Wp,-U_FORTIFY_SOURCE) args+=(-U_FORTIFY_SOURCE);; *) args+=("$arg");; esac
+  case "$arg" in --target|-target) skip=1;; --target=*|-target=*|-Wl,-melf_i386) ;; -Wp,-U_FORTIFY_SOURCE) args+=(-U_FORTIFY_SOURCE);; *) args+=("$arg");; esac
 done
 exec zig c++ -target x86-linux-musl -mcpu=pentium "${args[@]}" -fno-sanitize=undefined
