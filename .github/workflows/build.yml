@@ -160,7 +160,7 @@ jobs:
           git clone --depth 1 --branch builds/494 https://github.com/ish-app/ish.git emulator
           test "$(git -C emulator rev-parse HEAD)" = 216cf98a7cda1d68221add374630ede00aae9cd4
           git -C emulator submodule update --init --depth 1 deps/libapps
-          CC=clang meson setup emulator/build emulator --buildtype=debugoptimized -Dlog=strace
+          CC=clang meson setup emulator/build emulator --buildtype=debugoptimized
           ninja -C emulator/build -j 2 ish tools/fakefsify
       - name: Prepare checksum verified x86 Alpine guest and release
         run: |
