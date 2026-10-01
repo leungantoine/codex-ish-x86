@@ -1,4 +1,4 @@
-name: Check 32-bit Rust runtime in released standard iSH
+name: Check 32-bit Rust and Tokio runtime in released standard iSH
 on:
   workflow_dispatch:
   push:
