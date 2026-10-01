@@ -64,13 +64,16 @@ jobs:
           tar -xzf alpine.tar.gz -C root
           tar -czf guest.tar.gz -C root .
           emulator/build/tools/fakefsify guest.tar.gz guest
-          timeout 120 emulator/build/ish -f guest /preflight 2>runtime-stderr.log
-          timeout 120 emulator/build/ish -f guest /syscall-probe 2>probe-stderr.log
+          exec 555>runtime-stderr.log
+          timeout 120 emulator/build/ish -f guest /bin/sh -c 'printf "guest-shell-ok\\n"; ls -l /bin/sh /bin/busybox /lib/ld-musl-i386.so.1' 2>>runtime-stderr.log
+          timeout 120 emulator/build/ish -f guest /preflight 2>>runtime-stderr.log
+          timeout 120 emulator/build/ish -f guest /syscall-probe 2>>runtime-stderr.log
       - name: Print runtime failure detail
         if: failure()
-        run: tail -35 runtime-stderr.log || true
+        run: tail -100 runtime-stderr.log || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: x86-runtime-preflight-logs
           path: '*-stderr.log'
+
