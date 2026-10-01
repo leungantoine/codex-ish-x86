@@ -26,6 +26,10 @@ jobs:
           brew install meson ninja llvm lld libarchive pkg-config coreutils
           export PATH="$(brew --prefix llvm)/bin:$(brew --prefix coreutils)/libexec/gnubin:$PATH"
           export PKG_CONFIG_PATH="$(brew --prefix libarchive)/lib/pkgconfig"
+          # Released iSH copies the host hostname into a 65-byte guest field.
+          # Use an ordinary short name in this disposable VM, like the iOS app.
+          hostname
+          sudo hostname ish-x86-test
           git clone --depth 1 --branch builds/494 https://github.com/ish-app/ish.git emulator
           test "$(git -C emulator rev-parse HEAD)" = 216cf98a7cda1d68221add374630ede00aae9cd4
           git -C emulator submodule update --init --depth 1 deps/libapps
@@ -73,7 +77,7 @@ jobs:
         if: failure()
         run: |
           chmod +x root/*
-          lldb --batch -o 'run -f guest /bin/sh -c true' -o 'thread backtrace all' emulator/build/ish || true
+          lldb --batch -o 'run -f guest /bin/sh -c true' -k 'thread backtrace all' emulator/build/ish || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
