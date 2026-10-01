@@ -30,6 +30,24 @@ use tokio::process::Command;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
+    // Exercise timed futex waits and wakeups, including the rebuilt std fallback.
+    let pair = std::sync::Arc::new((std::sync::Mutex::new(()), std::sync::Condvar::new()));
+    let start = std::time::Instant::now();
+    let (guard, timeout) = pair.1.wait_timeout(pair.0.lock().unwrap(), Duration::from_millis(50)).unwrap();
+    assert!(timeout.timed_out());
+    assert!(start.elapsed() >= Duration::from_millis(40));
+    drop(guard);
+    let wake_pair = pair.clone();
+    let wake = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(20));
+        let _guard = wake_pair.0.lock().unwrap();
+        wake_pair.1.notify_one();
+    });
+    let (guard, timeout) = pair.1.wait_timeout(pair.0.lock().unwrap(), Duration::from_secs(2)).unwrap();
+    assert!(!timeout.timed_out());
+    drop(guard);
+    wake.join().unwrap();
+    println!("PASS: standard library timed wait and wake checks");
     let mode = std::env::var("ISH_TEST_MODE").unwrap_or_default();
     let wrong_parent = mode == "einval";
     let expect_error = mode == "eperm";
@@ -57,6 +75,14 @@ async fn main() {
         }).await.unwrap();
     }
     if !expect_error {
+        tokio::spawn(async {
+            let mut bad = Command::new("/definitely-missing-ish-test-command");
+            unsafe { bad.pre_exec(|| Ok(())); }
+            assert_eq!(bad.spawn().unwrap_err().raw_os_error(), Some(libc::ENOENT));
+            let mut denied = Command::new("/bin/sh");
+            unsafe { denied.pre_exec(|| Err(std::io::Error::from_raw_os_error(libc::EPERM))); }
+            assert_eq!(denied.spawn().unwrap_err().raw_os_error(), Some(libc::EPERM));
+        }).await.unwrap();
         tokio::spawn(async {
             let mut child = Command::new("/bin/sleep").arg("30").kill_on_drop(true).spawn().unwrap();
             child.kill().await.unwrap();
@@ -129,6 +155,6 @@ grep -Fxq 'PASS: injected standard iSH kernel identity' "$work/ish.log"
 if [[ -n "${ISH_X86_HARNESS_OUT:-}" ]]; then
   CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_LINKER="$repo_root/build-tools/zigcc" \
   CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_RUSTFLAGS='-C link-self-contained=no -C target-cpu=pentium4' \
-    cargo build --manifest-path "$work/harness/Cargo.toml" --release --target i686-unknown-linux-musl -j 1
+  RUSTC_BOOTSTRAP=1 cargo -Z build-std=std,panic_abort build --manifest-path "$work/harness/Cargo.toml" --release --target i686-unknown-linux-musl -j 1
   cp "$work/harness/target/i686-unknown-linux-musl/release/ish-subprocess-verification" "$ISH_X86_HARNESS_OUT"
 fi
