@@ -95,6 +95,7 @@ jobs:
         if: failure()
         run: |
           cat runtime-stderr.log || true
+          grep -a -B 8 -A 8 -E '0xffffffea|missing syscall' runtime-strace.log || true
           tail -100 runtime-strace.log || true
       - uses: actions/upload-artifact@v4
         if: always()
