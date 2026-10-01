@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add an ENOSYS basic-futex fallback to the exact Rust 1.95 standard source."""
+"""Patch checksum-pinned Rust 1.95.0 runtime facilities unsupported by standard iSH."""
 import hashlib
 import difflib
 import json
@@ -135,6 +135,49 @@ old = """                Ok(..) => {
 assert p.count(old) == 1
 process_path.write_text(p.replace(old, ""))
 subprocess.run(["rustfmt", "--edition", "2024", str(process_path)], check=True)
+thread_path = sysroot / "lib/rustlib/src/rust/library/std/src/sys/thread/unix.rs"
+thread_original = thread_path.read_bytes()
+thread_sha = "95920ddfd37a3864783624e0fa8df849fe919a8c5a9b733892e1bea38c0f411d"
+assert hashlib.sha256(thread_original).hexdigest() == thread_sha
+t = thread_original.decode()
+t = """#[cfg(target_os = "linux")]
+fn is_ish_kernel() -> bool {
+    static IS_ISH: crate::sync::OnceLock<bool> = crate::sync::OnceLock::new();
+    *IS_ISH.get_or_init(|| {
+        let mut uts = mem::MaybeUninit::<libc::utsname>::zeroed();
+        (unsafe { libc::uname(uts.as_mut_ptr()) }) == 0
+            && unsafe { crate::ffi::CStr::from_ptr(uts.assume_init().release.as_ptr()) }
+                .to_bytes().ends_with(b"-ish")
+    })
+}
+
+""" + t
+old = """                unsafe { libc::clock_nanosleep(crate::sys::time::Instant::CLOCK_ID, 0, rqtp, rmtp) }"""
+new = """                // iSH raises SIGSYS for missing clock_nanosleep. Select
+                // its existing nanosleep before attempting that syscall.
+                #[cfg(target_os = "linux")]
+                if is_ish_kernel() {
+                    let result = unsafe { libc::nanosleep(rqtp, rmtp) };
+                    return if result == 0 { 0 } else { sys::io::errno() };
+                }
+                unsafe { libc::clock_nanosleep(crate::sys::time::Instant::CLOCK_ID, 0, rqtp, rmtp) }"""
+assert t.count(old) == 1
+t = t.replace(old, new)
+old = """pub fn sleep_until(deadline: crate::time::Instant) {
+    use crate::time::Instant;
+"""
+new = old + """
+    #[cfg(target_os = "linux")]
+    if is_ish_kernel() {
+        if let Some(delay) = deadline.checked_duration_since(Instant::now()) {
+            sleep(delay);
+        }
+        return;
+    }
+"""
+assert t.count(old) == 1
+thread_path.write_text(t.replace(old, new))
+subprocess.run(["rustfmt", "--edition", "2024", str(thread_path)], check=True)
 info = {
     "rust_version": "1.95.0",
     "files": {
@@ -142,12 +185,16 @@ info = {
             "original_sha256": original_sha,
             "patched_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         },
+        "library/std/src/sys/thread/unix.rs": {
+            "original_sha256": thread_sha,
+            "patched_sha256": hashlib.sha256(thread_path.read_bytes()).hexdigest(),
+        },
         "library/std/src/sys/process/unix/unix.rs": {
             "original_sha256": process_sha,
             "patched_sha256": hashlib.sha256(process_path.read_bytes()).hexdigest(),
         },
     },
-    "policies": ["FUTEX_WAIT_BITSET ENOSYS selects FUTEX_WAIT; preserve monotonic deadline",
+    "policies": ["iSH selects nanosleep before missing clock_nanosleep; retain EINTR remainder","FUTEX_WAIT_BITSET ENOSYS selects FUTEX_WAIT; preserve monotonic deadline",
                  "iSH SEQPACKET EINVAL selects STREAM only without pidfd transfer; accumulate error frame"],
     "build": "RUSTC_BOOTSTRAP=1 cargo -Z build-std=std,panic_abort for i686 only",
 }
@@ -156,7 +203,8 @@ output.mkdir(parents=True, exist_ok=True)
 (output / "RUSTSTDINFO.json").write_text(json.dumps(info, indent=2) + "\n")
 patch = ""
 for source, before, name in [(path, original, "library/std/src/sys/pal/unix/futex.rs"),
-                             (process_path, process_original, "library/std/src/sys/process/unix/unix.rs")]:
+                             (process_path, process_original, "library/std/src/sys/process/unix/unix.rs"),
+                             (thread_path, thread_original, "library/std/src/sys/thread/unix.rs")]:
     patch += "".join(difflib.unified_diff(before.decode().splitlines(True), source.read_text().splitlines(True),
                                         fromfile="a/" + name, tofile="b/" + name))
 (output / "rust-std.patch").write_text(patch)

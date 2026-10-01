@@ -91,6 +91,27 @@ for i, block in enumerate(blocks):
         blocks[i] = "\n".join(line for line in block.split("\n") if not line.startswith(("source = ", "checksum = ")))
 lock_path.write_text("[[package]]".join(blocks))
 
+# seccompiler does not implement the 32-bit x86 architecture. Keep the
+# existing 64-bit filters intact; explicitly fail requests on x86 rather
+# than compiling nonexistent syscall constants or silently omitting a filter.
+landlock = root / "codex-rs/linux-sandbox/src/landlock.rs"
+s = landlock.read_text()
+anchor = "fn install_network_seccomp_filter_on_current_thread("
+assert s.count(anchor) == 1
+fallback = """#[cfg(target_arch = "x86")]
+fn install_network_seccomp_filter_on_current_thread(
+    _mode: NetworkSeccompMode,
+    _managed_network: Option<&ManagedNetworkSandboxContext>,
+) -> std::result::Result<(), SandboxErr> {
+    Err(SandboxErr::SeccompBackend(
+        seccompiler::BackendError::InvalidTargetArch("x86".to_string()),
+    ))
+}
+
+#[cfg(not(target_arch = "x86"))]
+"""
+landlock.write_text(s.replace(anchor, fallback + anchor))
+
 catalog = json.loads((root / "codex-rs/models-manager/models.json").read_text())
 changed = []
 for model in catalog["models"]:
@@ -109,7 +130,7 @@ compat.mkdir()
     "patched_source_sha256": {
         str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
         for p in (root / "codex-rs/utils/pty/src/process_group.rs", pidfd,
-                  manifest, lock_path, compat / "models-direct.json")
+                  manifest, lock_path, landlock, compat / "models-direct.json")
     },
 }, indent=2) + "\n")
 print("Prepared checked source, Tokio, manifests, and direct models:", changed)
@@ -126,6 +147,7 @@ openssl.write_text(s)
 
 info_path = compat / "PATCHINFO.json"
 info = json.loads(info_path.read_text())
+info["x86_seccomp_policy"] = "Unsupported x86 filter requests fail with InvalidTargetArch; normal 64-bit filters unchanged"
 info["target"] = "i686-unknown-linux-musl"
 info["blake3_features"] = ["pure"]
 info["standard_ish_pidfd_policy"] = "uname release suffix -ish selects SIGCHLD before pidfd_open"

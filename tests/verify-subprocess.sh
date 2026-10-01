@@ -39,7 +39,9 @@ async fn main() {
     drop(guard);
     let wake_pair = pair.clone();
     let wake = std::thread::spawn(move || {
+        let start = std::time::Instant::now();
         std::thread::sleep(Duration::from_millis(20));
+        assert!(start.elapsed() >= Duration::from_millis(15));
         let _guard = wake_pair.0.lock().unwrap();
         wake_pair.1.notify_one();
     });
