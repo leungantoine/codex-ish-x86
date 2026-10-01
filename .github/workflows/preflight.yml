@@ -48,6 +48,7 @@ jobs:
             -C linker="$PWD/build-tools/zigcc" -C link-self-contained=no \
             "$RUNNER_TEMP/preflight.rs" -o root/preflight
           build-tools/zigcc -O2 -static tests/ish-syscall-probe.c -o root/syscall-probe
+          build-tools/zigcc -O2 -static tests/signal-probe.c -o root/signal-probe
           readelf -h root/preflight | grep -q 'Class:.*ELF32'
           readelf -h root/preflight | grep -q 'Machine:.*Intel 80386'
       - name: Test actual patched Tokio and prepare its ELF32 subprocess harness
@@ -96,7 +97,7 @@ jobs:
         run: |
           export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
           ulimit -n 4096
-          chmod +x root/preflight root/tokio-probe root/syscall-probe
+          chmod +x root/preflight root/tokio-probe root/syscall-probe root/signal-probe
           base=https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86
           curl -fsSL "$base/alpine-minirootfs-3.23.3-x86.tar.gz" -o alpine.tar.gz
           curl -fsSL "$base/alpine-minirootfs-3.23.3-x86.tar.gz.sha256" -o alpine.sha256
@@ -120,6 +121,8 @@ jobs:
           ' 2>>runtime-stderr.log
           timeout 120 emulator/build/ish -f guest /bin/sh -c 'printf "guest-shell-ok\\n"; ls -l /bin/sh /bin/busybox /lib/ld-musl-i386.so.1' 2>>runtime-stderr.log
           timeout 120 emulator/build/ish -f guest /preflight 2>>runtime-stderr.log
+          chmod +x root/signal-probe
+          timeout 120 emulator/build/ish -f guest /signal-probe 2>>runtime-stderr.log
           timeout 120 emulator/build/ish -f guest /tokio-probe 2>>runtime-stderr.log
           timeout 120 emulator/build/ish -f guest /syscall-probe 2>>runtime-stderr.log
           # At most initial racing detection calls may use the unsupported operation.
