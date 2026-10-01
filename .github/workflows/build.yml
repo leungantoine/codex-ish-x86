@@ -133,6 +133,18 @@ jobs:
           cp -a package root/codex
           tar -czf guest.tar.gz -C root .
           emulator/build/tools/fakefsify guest.tar.gz guest
+          # Alpine minirootfs omits nodes normally supplied by the iOS app.
+          timeout 120 emulator/build/ish -f guest /bin/sh -ec '
+            mkdir -p /dev/pts
+            mknod -m 666 /dev/null c 1 3
+            mknod -m 666 /dev/zero c 1 5
+            mknod -m 666 /dev/full c 1 7
+            mknod -m 666 /dev/random c 1 8
+            mknod -m 666 /dev/urandom c 1 9
+            mknod -m 666 /dev/tty c 5 0
+            mknod -m 666 /dev/ptmx c 5 2
+            test -c /dev/null
+          '
       - name: Version and syscall checks in standard iSH
         run: |
           timeout 120 emulator/build/ish -f guest /codex/codex --version | grep -Fx 'codex-cli 0.160.0'

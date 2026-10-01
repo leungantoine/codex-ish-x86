@@ -55,6 +55,10 @@ manifest = root / "codex-rs/Cargo.toml"
 s = manifest.read_text()
 assert s.count("[patch.crates-io]") == 1
 s = s.replace("[patch.crates-io]", '[patch.crates-io]\ntokio = { path = "vendor/tokio-1.52.3" }')
+assert s.count('blake3 = "1.8.2"') == 1
+# The upstream pure feature omits the AVX-512 C backend; Rust implementations
+# still select supported instruction sets at runtime in the x86 emulator.
+s = s.replace('blake3 = "1.8.2"', 'blake3 = { version = "1.8.2", features = ["pure"] }')
 s += "\n[profile.release.package.zbus]\ncodegen-units = 1\n\n[profile.release.package.codex-model-provider]\ncodegen-units = 1\n"
 manifest.write_text(s)
 blocks = lock_text.split("[[package]]")
@@ -99,6 +103,7 @@ openssl.write_text(s)
 info_path = compat / "PATCHINFO.json"
 info = json.loads(info_path.read_text())
 info["target"] = "i686-unknown-linux-musl"
+info["blake3_features"] = ["pure"]
 info["omitted_executables"] = ["codex-code-mode-host"]
 info["patched_source_sha256"][str(openssl.relative_to(root))] = hashlib.sha256(openssl.read_bytes()).hexdigest()
 info_path.write_text(json.dumps(info, indent=2) + "\n")

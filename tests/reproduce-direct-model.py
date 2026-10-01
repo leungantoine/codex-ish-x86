@@ -122,10 +122,10 @@ env = os.environ.copy()
 env.pop("OPENAI_API_KEY", None)
 env.pop("CODEX_API_KEY", None)
 with open(f"{label}-stderr.log", "wb") as errors:
-    os.dup2(errors.fileno(), 555)
+    os.dup2(errors.fileno(), 666)
     process = subprocess.Popen(command + overrides, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, pass_fds=(555,), env=env)
-    os.close(555)
+                               stderr=subprocess.PIPE, pass_fds=(666,), env=env)
+    os.close(666)
     try:
         stdout, stderr = process.communicate(timeout=240)
     except subprocess.TimeoutExpired:
