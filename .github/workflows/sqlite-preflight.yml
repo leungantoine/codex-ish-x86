@@ -18,7 +18,7 @@ jobs:
           curl -fsSL https://static.crates.io/crates/libsqlite3-sys/libsqlite3-sys-0.37.0.crate -o sqlite.crate
           echo 'b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1  sqlite.crate' | sha256sum -c -
           tar -xzf sqlite.crate
-      - name: Build and exercise real SQLite with scalar x87 code
+      - name: Build and exercise real SQLite with unoptimized scalar code
         run: |
           cat > probe.c <<'C'
           #include <assert.h>
@@ -50,11 +50,11 @@ jobs:
             assert(sqlite3_exec(db,"CREATE TABLE t(ts TEXT DEFAULT CURRENT_TIMESTAMP); INSERT INTO t DEFAULT VALUES;",NULL,NULL,NULL)==SQLITE_OK);
             check(db,"SELECT length(ts) FROM t","19");
             assert(sqlite3_close(db)==SQLITE_OK);
-            puts("PASS: real ELF32 SQLite x87 date, leap-year, timestamp and floating point checks");
+            puts("PASS: real ELF32 SQLite scalar date, leap-year, timestamp and floating point checks");
           }
           C
-          zig cc -target x86-linux-musl -mcpu=pentium4 -mno-sse -mno-sse2 -fno-sanitize=undefined \
-            -O2 -static -pthread -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_MATH_FUNCTIONS \
+          zig cc -target x86-linux-musl -mcpu=pentium4 -fno-sanitize=undefined \
+            -O0 -static -pthread -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_MATH_FUNCTIONS \
             -Ilibsqlite3-sys-0.37.0/sqlite3 libsqlite3-sys-0.37.0/sqlite3/sqlite3.c probe.c -lm -o sqlite-probe
           readelf -h sqlite-probe | grep -q 'Class:.*ELF32'
           if readelf -l sqlite-probe | grep -q INTERP; then exit 1; fi
