@@ -3,6 +3,7 @@ set -euo pipefail
 kit=$(cd "$(dirname "$0")/.." && pwd)
 source_root=$(cd "${1:?upstream source directory required}" && pwd)
 export TARGET=i686-unknown-linux-musl
+export RUSTC_WRAPPER="$kit/build-tools/rustc-wrapper"
 export RUNNER_TEMP="${RUNNER_TEMP:-/tmp}"
 export CC="$kit/build-tools/zigcc" CXX="$kit/build-tools/zigcxx"
 export CC_i686_unknown_linux_musl="$CC" CXX_i686_unknown_linux_musl="$CXX"
@@ -59,6 +60,8 @@ cp "$kit/licenses/rust/"* "$package/licenses/rust/"
 cp "$kit/licenses/llvm/LICENSE.TXT" "$package/licenses/llvm/"
 cp "$kit/build-tools/atomic-query.c" "$package/compat/"
 cp "$kit/build-tools/zigcc" "$package/compat/zigcc"
+cp "$kit/build-tools/rustc-wrapper" "$package/compat/rustc-wrapper"
+cp codex-rs/utils/pty/src/linux_fds.rs "$package/compat/linux_fds.rs"
 cp codex-rs/vendor/event-listener-5.4.1/src/notify.rs "$package/compat/event-listener-notify.rs"
 find codex-rs/vendor/event-listener-5.4.1 -maxdepth 1 -iname '*license*' -type f -exec cp {} "$package/licenses/event-listener/" \;
 test -n "$(find "$package/licenses/event-listener" -type f -print -quit)"
@@ -82,6 +85,8 @@ Event listener: locked 5.4.1 source; 32-bit full fence uses LOCK OR; x86-64 unch
 BLAKE3: upstream pure feature, AVX-512 C backend omitted
 Direct tools; no V8 host, daemon, or Linux sandbox support in standard iSH.
 Physical iOS authentication, performance, and background behavior require device tests.
+Descriptor cleanup: iSH uses upstream stack-only /proc fallback before unsupported close_range
+Regex-automata: i686-only automatic vectorization disabled; CPU, ABI and optimization level unchanged
 Concurrent-queue: checksum-pinned 2.5.0; 32-bit LOCK OR full barrier; x86-64 unchanged
 INFO
 (cd "$package" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)

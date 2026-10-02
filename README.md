@@ -79,6 +79,10 @@ Daemon mode, local V8 execution, and sandboxed Linux execution are unsupported. 
 
 8. Vendored checksum-pinned `event-listener` 5.4.1 and `concurrent-queue` 2.5.0: use `LOCK OR` on a local word for the 32-bit full memory fence because standard iSH rejects `LOCK NOT`. Declare the condition-code clobber; retain the full memory barrier. The x86-64 implementation is unchanged.
 
+9. Descriptor cleanup detects the iSH kernel with a stack-only `uname` call and uses upstream's existing `/proc/self/fd` fallback before `close_range`, which raises SIGSYS on this guest. Stdio, explicitly preserved descriptors, and the spawn error channel retain their normal treatment. Real Linux keeps its original path.
+
+10. The i686 compiler wrapper disables only automatic loop and SLP vectorization for `regex_automata` 0.4.13. LLVM's optimized integer bitset comparison emitted `MOVMSKPS`, which standard iSH rejects. CPU features, floating-point ABI and optimization level stay unchanged. Other crates and native builds receive no added flags. The wrapper and its hash are packaged; the focused harness compiles and searches ASCII and Unicode expressions.
+
 `scripts/prepare-source.py` checks the exact source commit before patching. `compat/PATCHINFO.json` in the archive records source, original Tokio checksum, catalog changes and final patched input hashes. `compat/RUSTSTDINFO.json` and `compat/rust-std.patch` record the runtime source pins and exact patch; Rust licenses are included. Do not apply the ARM64 project's historical overlay to this source.
 
 ## Build and verification
@@ -158,3 +162,7 @@ The restarted [build 36959204334](https://github.com/leungantoine/codex-ish-x86/
 ### Unbounded queue fence finding
 
 [Build 36971004602](https://github.com/leungantoine/codex-ish-x86/actions/runs/36971004602) produced all four binaries and passed static, QEMU, native model-tool and installer checks. Its full iSH loop exposed the same unsupported `LOCK NOT` in `concurrent-queue` 2.5.0's unbounded queue, confirmed by [binary inspection 36980097401](https://github.com/leungantoine/codex-ish-x86/actions/runs/36980097401). This crate now receives the same checksum-verified 32-bit locked OR fence patch, retaining the full barrier and declaring flag changes. The focused harness tests both bounded and unbounded channels with four concurrent producers and 200 unique messages each. Final CLI verification is still required before publication. The earlier event notification/runtime harness passed on rerun; two additional ordinary runs passed, while one initial native emulator SIGSEGV remains unexplained.
+
+### Regex and descriptor cleanup finding
+
+[Build 36980443112](https://github.com/leungantoine/codex-ish-x86/actions/runs/36980443112) completed in about an hour with cache reuse, produced all binaries, and passed native model-tool/installer checks. The standard-iSH test reached the advertised model tool request after the queue fixes, then exposed missing `close_range` (436) in child startup and unsupported `MOVMSKPS` in `regex_automata::hybrid::dfa::Config::byte_classes_from_nfa`. [Binary inspection 36986303023](https://github.com/leungantoine/codex-ish-x86/actions/runs/36986303023) confirmed the latter instruction and function. The narrow changes above need full rebuild and emulator checks before publication; no installable Release is claimed yet.

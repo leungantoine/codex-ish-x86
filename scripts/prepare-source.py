@@ -141,6 +141,29 @@ fn install_network_seccomp_filter_on_current_thread(
 """
 landlock.write_text(s.replace(anchor, fallback + anchor))
 
+# Missing close_range raises SIGSYS on iSH. Select upstream's existing
+# /proc/self/fd fallback before issuing it; this is stack-only after fork.
+linux_fds = root / "codex-rs/utils/pty/src/linux_fds.rs"
+s = linux_fds.read_text()
+anchor = "pub(crate) fn close_inherited_fds_except(preserved_fds: &[RawFd]) {"
+assert s.count(anchor) == 1
+s = s.replace(anchor, anchor + """
+    let mut uts = std::mem::MaybeUninit::<libc::utsname>::zeroed();
+    // SAFETY: uname writes to initialized stack storage; no allocation or locks.
+    if unsafe { libc::uname(uts.as_mut_ptr()) } == 0 {
+        let uts = unsafe { uts.assume_init() };
+        // SAFETY: successful uname NUL-terminates each field.
+        if unsafe { CStr::from_ptr(uts.release.as_ptr()) }
+            .to_bytes()
+            .ends_with(b"-ish")
+        {
+            close_from_proc(preserved_fds);
+            return;
+        }
+    }
+""")
+linux_fds.write_text(s)
+
 catalog = json.loads((root / "codex-rs/models-manager/models.json").read_text())
 changed = []
 for model in catalog["models"]:
@@ -159,7 +182,7 @@ compat.mkdir()
     "patched_source_sha256": {
         str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
         for p in (root / "codex-rs/utils/pty/src/process_group.rs", pidfd,
-                  manifest, lock_path, landlock, notify, queue_lib, compat / "models-direct.json")
+                  manifest, lock_path, landlock, linux_fds, notify, queue_lib, compat / "models-direct.json")
     },
 }, indent=2) + "\n")
 print("Prepared checked source, Tokio, manifests, and direct models:", changed)
@@ -190,6 +213,13 @@ info["event_listener_registry_sha256"] = event["checksum"]
 info["event_listener_fence_policy"] = "32-bit locked OR preserves full memory barrier; x86-64 locked NOT unchanged; flags clobber declared"
 info["concurrent_queue_registry_sha256"] = queue["checksum"]
 info["concurrent_queue_fence_policy"] = info["event_listener_fence_policy"]
+info["ish_fd_cleanup_policy"] = "uname release suffix -ish selects existing stack-only proc fallback before missing close_range; real Linux unchanged"
+regex_automata = next(p for p in tomllib.loads(lock_text)["package"] if p["name"] == "regex-automata")
+assert regex_automata["version"] == "0.4.13"
+assert regex_automata["checksum"] == "5276caf25ac86c8d810222b3dbb938e512c55c6831a10f3e6ed1c93b84041f1c"
+info["regex_automata_registry_sha256"] = regex_automata["checksum"]
+info["regex_automata_codegen_policy"] = "Only i686 regex_automata disables automatic loop and SLP vectorization to avoid MOVMSKPS; optimization level, CPU features and ABI unchanged"
+info["rustc_wrapper_sha256"] = hashlib.sha256((kit / "build-tools/rustc-wrapper").read_bytes()).hexdigest()
 info["blake3_features"] = ["pure"]
 info["standard_ish_pidfd_policy"] = "uname release suffix -ish selects SIGCHLD before pidfd_open"
 info["omitted_executables"] = ["codex-code-mode-host"]

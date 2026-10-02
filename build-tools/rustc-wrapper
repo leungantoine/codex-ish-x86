@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+compiler=$1
+shift
+crate_name=
+target=
+previous=
+for arg do
+    case "$previous" in
+        --crate-name) crate_name=$arg ;;
+        --target) target=$arg ;;
+    esac
+    case "$arg" in
+        --crate-name=*) crate_name=${arg#--crate-name=} ;;
+        --target=*) target=${arg#--target=} ;;
+    esac
+    previous=$arg
+done
+# LLVM auto-vectorizes an integer bitset comparison into MOVMSKPS, which
+# released iSH does not decode. Keep this crate's target features and ABI;
+# suppress only the two automatic vectorization passes for its x86 build.
+if [ "$crate_name" = regex_automata ] && [ "$target" = i686-unknown-linux-musl ]; then
+    exec "$compiler" "$@" -C no-vectorize-loops -C no-vectorize-slp
+fi
+exec "$compiler" "$@"

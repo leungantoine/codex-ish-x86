@@ -47,6 +47,10 @@ jobs:
           assert info['sqlite_registry_sha256']=='b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1'
           assert 'Only sqlite3.c uses -O0' in info['sqlite_codegen_policy']
           assert hashlib.sha256((p/'compat/zigcc').read_bytes()).hexdigest()==info['zigcc_sha256']
+          assert info['regex_automata_registry_sha256']=='5276caf25ac86c8d810222b3dbb938e512c55c6831a10f3e6ed1c93b84041f1c'
+          assert 'Only i686 regex_automata' in info['regex_automata_codegen_policy']
+          assert hashlib.sha256((p/'compat/rustc-wrapper').read_bytes()).hexdigest()==info['rustc_wrapper_sha256']
+          assert hashlib.sha256((p/'compat/linux_fds.rs').read_bytes()).hexdigest()==info['patched_source_sha256']['codex-rs/utils/pty/src/linux_fds.rs']
           assert info['concurrent_queue_registry_sha256']=='4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973'
           assert 'full memory barrier' in info['concurrent_queue_fence_policy']
           assert hashlib.sha256((p/'compat/concurrent-queue-lib.rs').read_bytes()).hexdigest()==info['patched_source_sha256']['codex-rs/vendor/concurrent-queue-2.5.0/src/lib.rs']

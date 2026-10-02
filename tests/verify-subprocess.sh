@@ -11,10 +11,12 @@ if [[ -n "${ISH_PATCHED_SOURCE:-}" ]]; then
   cp -a "$ISH_PATCHED_SOURCE/codex-rs/vendor/concurrent-queue-2.5.0" "$work/inputs/codex-rs/vendor/"
   mkdir -p "$work/inputs/codex-rs/utils/pty/src"
   cp "$ISH_PATCHED_SOURCE/codex-rs/utils/pty/src/process_group.rs" "$work/inputs/codex-rs/utils/pty/src/"
+  cp "$ISH_PATCHED_SOURCE/codex-rs/utils/pty/src/linux_fds.rs" "$work/inputs/codex-rs/utils/pty/src/"
 else
   tar -xzf "$repo_root/ish-overlay.tar.gz" -C "$work/inputs"
 fi
 cp "$work/inputs/codex-rs/utils/pty/src/process_group.rs" "$work/harness/src/process_group.rs"
+cp "$work/inputs/codex-rs/utils/pty/src/linux_fds.rs" "$work/harness/src/linux_fds.rs"
 cat > "$work/harness/Cargo.toml" <<EOF
 [package]
 name = "ish-subprocess-verification"
@@ -25,6 +27,8 @@ libc = "=0.2.186"
 tokio = { path = "$work/inputs/codex-rs/vendor/tokio-1.52.3", features = ["process", "rt-multi-thread", "macros", "time"] }
 event-listener = { path = "$work/inputs/codex-rs/vendor/event-listener-5.4.1" }
 async-channel = "=2.5.0"
+regex = "=1.12.3"
+regex-automata = "=0.4.13"
 [patch.crates-io]
 event-listener = { path = "$work/inputs/codex-rs/vendor/event-listener-5.4.1" }
 concurrent-queue = { path = "$work/inputs/codex-rs/vendor/concurrent-queue-2.5.0" }
@@ -32,12 +36,25 @@ EOF
 cat > "$work/harness/src/main.rs" <<'RS'
 #[allow(dead_code)]
 mod process_group;
+#[allow(dead_code)]
+mod linux_fds;
 use std::time::Duration;
 use tokio::process::Command;
 use event_listener::{Event, IntoNotification, Listener};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
+    for (pattern, text, expected) in [
+        (r"[a-zA-Z0-9_]+", "ish-shell-ok_17", "ish"),
+        (r"(?:ish|codex)-shell-[a-z]+", "prefix codex-shell-ok suffix", "codex-shell-ok"),
+        (r"\p{Greek}+", "hello αβγ world", "αβγ"),
+        (r"(?m)^exit=[0-9]+$", "start\nexit=17\nend", "exit=17"),
+    ] {
+        let regex = regex::Regex::new(pattern).unwrap();
+        assert_eq!(regex.find(text).unwrap().as_str(), expected);
+        assert!(!regex.is_match("!"));
+    }
+    println!("PASS: actual regex-automata compilation and ASCII/Unicode/search checks");
     for _ in 0..20 {
         let event = std::sync::Arc::new(Event::new());
         let value = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -99,6 +116,7 @@ async fn main() {
             command.kill_on_drop(true);
             unsafe {
                 command.pre_exec(move || {
+                    linux_fds::close_inherited_fds_except(&[]);
                     process_group::detach_from_tty()?;
                     process_group::set_parent_death_signal(parent)
                 });
@@ -193,6 +211,7 @@ ISH_TEST_MODE=eperm LD_PRELOAD="$work/shim.so" "$work/harness/target/debug/ish-s
 ISH_TEST_MODE=ish LD_PRELOAD="$work/shim.so" "$work/harness/target/debug/ish-subprocess-verification" 2>&1 | tee "$work/ish.log"
 grep -Fxq 'PASS: injected standard iSH kernel identity' "$work/ish.log"
 if [[ -n "${ISH_X86_HARNESS_OUT:-}" ]]; then
+  RUSTC_WRAPPER="$repo_root/build-tools/rustc-wrapper" \
   CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_LINKER="$repo_root/build-tools/zigcc" \
   CARGO_TARGET_I686_UNKNOWN_LINUX_MUSL_RUSTFLAGS='-C link-self-contained=no -C target-cpu=pentium4' \
   RUSTC_BOOTSTRAP=1 cargo -Z build-std=std,panic_abort build --manifest-path "$work/harness/Cargo.toml" --release --target i686-unknown-linux-musl -j 1
