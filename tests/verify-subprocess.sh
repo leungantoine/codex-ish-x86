@@ -164,6 +164,10 @@ cat > "$work/shim.c" <<'C'
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
+static pid_t shim_parent;
+__attribute__((constructor)) static void remember_shim_parent(void) {
+    shim_parent = getpid();
+}
 int uname(struct utsname *uts) {
     const char *mode = getenv("ISH_TEST_MODE");
     if (mode && strcmp(mode,"ish")==0) {
@@ -171,7 +175,8 @@ int uname(struct utsname *uts) {
         strcpy(uts->sysname,"Linux");
         strcpy(uts->release,"4.20.69-ish");
         const char marker[]="PASS: injected standard iSH kernel identity\n";
-        write(STDERR_FILENO,marker,sizeof(marker)-1);
+        // A child pre_exec uname must not contaminate captured shell stderr.
+        if (getpid() == shim_parent) write(STDERR_FILENO,marker,sizeof(marker)-1);
         return 0;
     }
     int (*real_uname)(struct utsname *) = dlsym(RTLD_NEXT,"uname");
