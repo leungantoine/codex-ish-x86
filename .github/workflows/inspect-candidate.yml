@@ -1,0 +1,39 @@
+name: Locate standard iSH instruction failure
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/inspect-candidate.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: codex-ish-x86
+          run-id: 36952350602
+          github-token: ${{ github.token }}
+      - name: Inspect actual completed x86 binary
+        run: |
+          sha256sum -c codex-ish-x86.tar.gz.sha256
+          mkdir package
+          tar -xzf codex-ish-x86.tar.gz -C package
+          package/codex --version
+          objdump -d -C --start-address=0x100508e0 --stop-address=0x10050a40 package/codex
+          nm -n -C package/codex > symbols.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          addresses=[0x100509a8,0x1004cf5d,0x1004e2a0,0x0ffa0829,0x0ff9f483]
+          symbols=[]
+          for line in Path('symbols.txt').read_text().splitlines():
+              fields=line.split(' ',2)
+              try: address=int(fields[0],16)
+              except ValueError: continue
+              if len(fields)==3: symbols.append((address,fields[2]))
+          for address in addresses:
+              before=[s for s in symbols if s[0]<=address]
+              print(hex(address),before[-1] if before else None)
+          PY
