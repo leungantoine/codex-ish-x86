@@ -77,7 +77,7 @@ Daemon mode, local V8 execution, and sandboxed Linux execution are unsupported. 
 6. On 32-bit x86, requests for seccompiler network filters fail explicitly with its unsupported-architecture error. The existing 64-bit filters are unchanged; requesting a filter never silently succeeds. This port runs with full guest access as documented above.
 7. Generate the direct catalog from the pinned source by changing only `tool_mode` for the seven existing GPT-6/GPT-6.1/GPT-5.6 entries. The command disables code mode and uses Codex's existing direct tools.
 
-8. Vendored checksum-pinned `event-listener` 5.4.1: use `LOCK OR` on a local word for the 32-bit full memory fence because standard iSH rejects `LOCK NOT`. Declare the condition-code clobber; retain the full memory barrier. The x86-64 implementation is unchanged.
+8. Vendored checksum-pinned `event-listener` 5.4.1 and `concurrent-queue` 2.5.0: use `LOCK OR` on a local word for the 32-bit full memory fence because standard iSH rejects `LOCK NOT`. Declare the condition-code clobber; retain the full memory barrier. The x86-64 implementation is unchanged.
 
 `scripts/prepare-source.py` checks the exact source commit before patching. `compat/PATCHINFO.json` in the archive records source, original Tokio checksum, catalog changes and final patched input hashes. `compat/RUSTSTDINFO.json` and `compat/rust-std.patch` record the runtime source pins and exact patch; Rust licenses are included. Do not apply the ARM64 project's historical overlay to this source.
 
@@ -154,3 +154,7 @@ Enabling the released emulator's optional syscall trace logger under the cloud c
 ### Event notification fence finding
 
 The restarted [build 36959204334](https://github.com/leungantoine/codex-ish-x86/actions/runs/36959204334) passed compilation, static checks and all native model-tool/installer tests with the SQLite fix. Standard iSH then rejected `LOCK NOT` in event-listener's hand-written notification fence. [Binary inspection 36970010378](https://github.com/leungantoine/codex-ish-x86/actions/runs/36970010378) identified the exact operation. The patched 32-bit fence uses supported `LOCK OR` and preserves the full barrier. The existing harness now checks 20 notifications with shared-memory visibility and 200 bounded-channel messages from four concurrent producers, in addition to its subprocess checks. These changes still require the new build and emulator verification before publication.
+
+### Unbounded queue fence finding
+
+[Build 36971004602](https://github.com/leungantoine/codex-ish-x86/actions/runs/36971004602) produced all four binaries and passed static, QEMU, native model-tool and installer checks. Its full iSH loop exposed the same unsupported `LOCK NOT` in `concurrent-queue` 2.5.0's unbounded queue, confirmed by [binary inspection 36980097401](https://github.com/leungantoine/codex-ish-x86/actions/runs/36980097401). This crate now receives the same checksum-verified 32-bit locked OR fence patch, retaining the full barrier and declaring flag changes. The focused harness tests both bounded and unbounded channels with four concurrent producers and 200 unique messages each. Final CLI verification is still required before publication. The earlier event notification/runtime harness passed on rerun; two additional ordinary runs passed, while one initial native emulator SIGSEGV remains unexplained.

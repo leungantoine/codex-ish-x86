@@ -43,7 +43,7 @@ test -n "$sqlite_source"
 qemu-i386-static "$RUNNER_TEMP/sqlite-runtime-probe"
 package="$kit/dist/codex-ish-x86"
 mkdir -p "$package"/{codex-path,codex-resources,diagnostics,compat,licenses/ripgrep,licenses/rust,licenses/llvm}
-mkdir -p "$package/licenses/event-listener"
+mkdir -p "$package/licenses/event-listener" "$package/licenses/concurrent-queue"
 for name in codex codex-responses-api-proxy; do
   install -m 0755 "codex-rs/target/$TARGET/release/$name" "$package/$name"
 done
@@ -62,6 +62,9 @@ cp "$kit/build-tools/zigcc" "$package/compat/zigcc"
 cp codex-rs/vendor/event-listener-5.4.1/src/notify.rs "$package/compat/event-listener-notify.rs"
 find codex-rs/vendor/event-listener-5.4.1 -maxdepth 1 -iname '*license*' -type f -exec cp {} "$package/licenses/event-listener/" \;
 test -n "$(find "$package/licenses/event-listener" -type f -print -quit)"
+cp codex-rs/vendor/concurrent-queue-2.5.0/src/lib.rs "$package/compat/concurrent-queue-lib.rs"
+find codex-rs/vendor/concurrent-queue-2.5.0 -maxdepth 1 -iname '*license*' -type f -exec cp {} "$package/licenses/concurrent-queue/" \;
+test -n "$(find "$package/licenses/concurrent-queue" -type f -print -quit)"
 rg_source=$(find "$HOME/.cargo/registry/src" -type d -name ripgrep-15.2.0 -print -quit)
 for name in COPYING LICENSE-MIT UNLICENSE; do cp "$rg_source/$name" "$package/licenses/ripgrep/"; done
 cat > "$package/BUILDINFO" <<INFO
@@ -79,6 +82,7 @@ Event listener: locked 5.4.1 source; 32-bit full fence uses LOCK OR; x86-64 unch
 BLAKE3: upstream pure feature, AVX-512 C backend omitted
 Direct tools; no V8 host, daemon, or Linux sandbox support in standard iSH.
 Physical iOS authentication, performance, and background behavior require device tests.
+Concurrent-queue: checksum-pinned 2.5.0; 32-bit LOCK OR full barrier; x86-64 unchanged
 INFO
 (cd "$package" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 tar -czf "$kit/dist/codex-ish-x86.tar.gz" -C "$package" .

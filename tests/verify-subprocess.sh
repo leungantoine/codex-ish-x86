@@ -8,6 +8,7 @@ if [[ -n "${ISH_PATCHED_SOURCE:-}" ]]; then
   mkdir -p "$work/inputs/codex-rs/vendor"
   cp -a "$ISH_PATCHED_SOURCE/codex-rs/vendor/tokio-1.52.3" "$work/inputs/codex-rs/vendor/"
   cp -a "$ISH_PATCHED_SOURCE/codex-rs/vendor/event-listener-5.4.1" "$work/inputs/codex-rs/vendor/"
+  cp -a "$ISH_PATCHED_SOURCE/codex-rs/vendor/concurrent-queue-2.5.0" "$work/inputs/codex-rs/vendor/"
   mkdir -p "$work/inputs/codex-rs/utils/pty/src"
   cp "$ISH_PATCHED_SOURCE/codex-rs/utils/pty/src/process_group.rs" "$work/inputs/codex-rs/utils/pty/src/"
 else
@@ -26,6 +27,7 @@ event-listener = { path = "$work/inputs/codex-rs/vendor/event-listener-5.4.1" }
 async-channel = "=2.5.0"
 [patch.crates-io]
 event-listener = { path = "$work/inputs/codex-rs/vendor/event-listener-5.4.1" }
+concurrent-queue = { path = "$work/inputs/codex-rs/vendor/concurrent-queue-2.5.0" }
 EOF
 cat > "$work/harness/src/main.rs" <<'RS'
 #[allow(dead_code)]
@@ -50,20 +52,22 @@ async fn main() {
         assert_eq!(value.load(std::sync::atomic::Ordering::Acquire), 17);
         worker.join().unwrap();
     }
-    let (sender, receiver) = async_channel::bounded(1);
-    let mut workers = Vec::new();
-    for worker in 0..4 {
-        let sender = sender.clone();
-        workers.push(std::thread::spawn(move || {
-            for item in 0..50 { sender.send_blocking(worker * 50 + item).unwrap(); }
-        }));
+    for unbounded in [false, true] {
+        let (sender, receiver) = if unbounded { async_channel::unbounded() } else { async_channel::bounded(1) };
+        let mut workers = Vec::new();
+        for worker in 0..4 {
+            let sender = sender.clone();
+            workers.push(std::thread::spawn(move || {
+                for item in 0..50 { sender.send_blocking(worker * 50 + item).unwrap(); }
+            }));
+        }
+        drop(sender);
+        let mut seen = std::collections::HashSet::new();
+        while let Ok(item) = receiver.recv_blocking() { assert!(seen.insert(item)); }
+        for worker in workers { worker.join().unwrap(); }
+        assert_eq!(seen.len(), 200);
     }
-    drop(sender);
-    let mut seen = std::collections::HashSet::new();
-    while let Ok(item) = receiver.recv_blocking() { assert!(seen.insert(item)); }
-    for worker in workers { worker.join().unwrap(); }
-    assert_eq!(seen.len(), 200);
-    println!("PASS: patched event-listener notifications and 200 concurrent bounded-channel messages");
+    println!("PASS: patched event-listener notifications and 200 bounded and 200 unbounded concurrent-channel messages");
     // Exercise timed futex waits and wakeups, including the rebuilt std fallback.
     let pair = std::sync::Arc::new((std::sync::Mutex::new(()), std::sync::Condvar::new()));
     let start = std::time::Instant::now();

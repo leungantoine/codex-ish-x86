@@ -47,6 +47,9 @@ jobs:
           assert info['sqlite_registry_sha256']=='b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1'
           assert 'Only sqlite3.c uses -O0' in info['sqlite_codegen_policy']
           assert hashlib.sha256((p/'compat/zigcc').read_bytes()).hexdigest()==info['zigcc_sha256']
+          assert info['concurrent_queue_registry_sha256']=='4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973'
+          assert 'full memory barrier' in info['concurrent_queue_fence_policy']
+          assert hashlib.sha256((p/'compat/concurrent-queue-lib.rs').read_bytes()).hexdigest()==info['patched_source_sha256']['codex-rs/vendor/concurrent-queue-2.5.0/src/lib.rs']
           assert info['event_listener_registry_sha256']=='e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab'
           assert 'full memory barrier' in info['event_listener_fence_policy']
           assert hashlib.sha256((p/'compat/event-listener-notify.rs').read_bytes()).hexdigest()==info['patched_source_sha256']['codex-rs/vendor/event-listener-5.4.1/src/notify.rs']
