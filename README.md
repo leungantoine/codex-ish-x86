@@ -2,7 +2,7 @@
 
 This repository ports **OpenAI's real Codex CLI** to standard [App Store iSH](https://apps.apple.com/us/app/ish-shell/id1436902243), which emulates 32-bit x86. It is separate from [codex-ish](https://github.com/leungantoine/codex-ish), the ARM64 iSH-AOK project. Neither binary can be used in the other guest architecture.
 
-**Status: Codex 0.160.0 built and verified for 32-bit x86.** Static ELF32 checks, QEMU, native Linux, and unmodified standard iSH passed. Physical iOS authentication, interactive tasks, performance and background behavior remain to be tested. [Download the latest Release](https://github.com/leungantoine/codex-ish-x86/releases/latest).
+**Status: Codex 0.160.0 binaries are published; a physical-device interactive startup failure is under investigation.** Static ELF32 checks, QEMU, native Linux, and noninteractive shell/app-server tests in unmodified standard iSH passed. A user reported `Illegal instruction` when launching plain `codex` in the App Store app; those earlier checks did not cover the interactive TUI startup path. Physical iOS authentication, interactive tasks, performance and background behavior remain to be tested. [Download the latest Release](https://github.com/leungantoine/codex-ish-x86/releases/latest).
 
 ## Source and target
 
