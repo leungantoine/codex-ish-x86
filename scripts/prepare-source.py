@@ -148,6 +148,8 @@ openssl.write_text(s)
 info_path = compat / "PATCHINFO.json"
 info = json.loads(info_path.read_text())
 info["x86_seccomp_policy"] = "Unsupported x86 filter requests fail with InvalidTargetArch; normal 64-bit filters unchanged"
+info["atomic_query_original_sha256"] = "9fcf5fc6f0cb1da23f004fa9bc3af1cfcb5589f0c8d20e7b6de863591b60eb98"
+info["atomic_query_sha256"] = hashlib.sha256((kit / "build-tools/atomic-query.c").read_bytes()).hexdigest()
 info["target"] = "i686-unknown-linux-musl"
 info["blake3_features"] = ["pure"]
 info["standard_ish_pidfd_policy"] = "uname release suffix -ish selects SIGCHLD before pidfd_open"

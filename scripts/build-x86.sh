@@ -24,12 +24,18 @@ OPENSSL_CC="$CC" OPENSSL_BUILD_JOBS=2 bash .github/scripts/install-musl-openssl.
 set -a
 source "$GITHUB_ENV"
 set +a
+# Exercise the same static crypto library and query shim before the final link.
+openssl_prefix=$I686_UNKNOWN_LINUX_MUSL_OPENSSL_DIR
+"$CC" -O2 -static -pthread -I"$openssl_prefix/include" \
+  "$kit/tests/atomic-runtime-probe.c" -L"$openssl_prefix/lib" -lcrypto -latomic \
+  -o "$RUNNER_TEMP/atomic-runtime-probe"
+qemu-i386-static "$RUNNER_TEMP/atomic-runtime-probe"
 # Select the actual CLI and proxy; the separate V8 host is not built.
 RUSTC_BOOTSTRAP=1 cargo -Z build-std=std,panic_abort build --manifest-path codex-rs/Cargo.toml --locked --release --target "$TARGET" -j 1 \
   --bin codex --bin codex-responses-api-proxy
 RUSTC_BOOTSTRAP=1 cargo -Z build-std=std,panic_abort install ripgrep --version 15.2.0 --locked --target "$TARGET" --root "$RUNNER_TEMP/rg-x86" -j 1
 package="$kit/dist/codex-ish-x86"
-mkdir -p "$package"/{codex-path,codex-resources,diagnostics,compat,licenses/ripgrep,licenses/rust}
+mkdir -p "$package"/{codex-path,codex-resources,diagnostics,compat,licenses/ripgrep,licenses/rust,licenses/llvm}
 for name in codex codex-responses-api-proxy; do
   install -m 0755 "codex-rs/target/$TARGET/release/$name" "$package/$name"
 done
@@ -42,6 +48,8 @@ cp LICENSE NOTICE "$package/"
 cp "$kit/README.md" "$package/README.md"
 cp "$kit/setup.sh" "$package/setup.sh"
 cp "$kit/licenses/rust/"* "$package/licenses/rust/"
+cp "$kit/licenses/llvm/LICENSE.TXT" "$package/licenses/llvm/"
+cp "$kit/build-tools/atomic-query.c" "$package/compat/"
 rg_source=$(find "$HOME/.cargo/registry/src" -type d -name ripgrep-15.2.0 -print -quit)
 for name in COPYING LICENSE-MIT UNLICENSE; do cp "$rg_source/$name" "$package/licenses/ripgrep/"; done
 cat > "$package/BUILDINFO" <<INFO
@@ -53,6 +61,7 @@ Zig: $(zig version)
 OpenSSL: 3.6.4, upstream SHA-256 verified, portable C, static musl
 Ripgrep: 15.2.0, built from its locked source crate
 Rust std: rebuilt from exact 1.95.0 source; iSH socket error-channel, sleep and ENOSYS futex fallbacks
+Atomic query: LLVM compiler-rt 19.1.7 size/alignment query; Zig link compatibility
 BLAKE3: upstream pure feature, AVX-512 C backend omitted
 Direct tools; no V8 host, daemon, or Linux sandbox support in standard iSH.
 Physical iOS authentication, performance, and background behavior require device tests.

@@ -58,11 +58,24 @@ jobs:
           (cd upstream && just fmt)
           python3 scripts/prepare-rust-std.py upstream/ish-compat
           ISH_PATCHED_SOURCE="$PWD/upstream" ISH_X86_HARNESS_OUT="$PWD/root/tokio-probe" bash tests/verify-subprocess.sh
+      - name: Build exact static OpenSSL and verify its atomic ABI probe
+        run: |
+          openssl_env=$(mktemp)
+          TARGET=i686-unknown-linux-musl GITHUB_ENV="$openssl_env" \
+            OPENSSL_CC="$PWD/build-tools/zigcc" OPENSSL_BUILD_JOBS=2 \
+            bash upstream/.github/scripts/install-musl-openssl.sh
+          set -a
+          source "$openssl_env"
+          set +a
+          prefix=$I686_UNKNOWN_LINUX_MUSL_OPENSSL_DIR
+          build-tools/zigcc -O2 -static -pthread -I"$prefix/include" \
+            tests/atomic-runtime-probe.c -L"$prefix/lib" -lcrypto -latomic -o root/atomic-probe
       - name: Check rebuilt runtime on normal Linux under QEMU
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user-static
           qemu-i386-static root/tokio-probe
+          qemu-i386-static root/atomic-probe
       - uses: actions/upload-artifact@v4
         with:
           name: x86-runtime-probes
@@ -97,7 +110,7 @@ jobs:
         run: |
           export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
           ulimit -n 4096
-          chmod +x root/preflight root/tokio-probe root/syscall-probe root/signal-probe
+          chmod +x root/preflight root/tokio-probe root/syscall-probe root/signal-probe root/atomic-probe
           base=https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86
           curl -fsSL "$base/alpine-minirootfs-3.23.3-x86.tar.gz" -o alpine.tar.gz
           curl -fsSL "$base/alpine-minirootfs-3.23.3-x86.tar.gz.sha256" -o alpine.sha256
@@ -124,6 +137,7 @@ jobs:
           chmod +x root/signal-probe
           timeout 120 emulator/build/ish -f guest /signal-probe 2>>runtime-stderr.log
           timeout 120 emulator/build/ish -f guest /tokio-probe 2>>runtime-stderr.log
+          timeout 120 emulator/build/ish -f guest /atomic-probe 2>>runtime-stderr.log
           timeout 120 emulator/build/ish -f guest /syscall-probe 2>>runtime-stderr.log
           # At most initial racing detection calls may use the unsupported operation.
           test "$(grep -ac 'unsupported futex operation 137' runtime-strace.log)" -le 8
