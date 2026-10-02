@@ -13,20 +13,16 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: codex-ish-x86
-          run-id: 36980443112
+          name: x86-runtime-probes
+          run-id: 36987165269
           github-token: ${{ github.token }}
       - name: Inspect actual completed x86 binary
         run: |
-          sha256sum -c codex-ish-x86.tar.gz.sha256
-          mkdir package
-          tar -xzf codex-ish-x86.tar.gz -C package
-          package/codex --version
-          objdump -d -C --start-address=0x131950a0 --stop-address=0x13195140 package/codex
-          nm -n -C package/codex > symbols.txt
+          objdump -d -C --start-address=0x000f1d60 --stop-address=0x000f1e40 tokio-probe
+          nm -n -C tokio-probe > symbols.txt
           python3 - <<'PY'
           from pathlib import Path
-          addresses=[0x131950f2,0x131954cd,0x131a2a24,0x131a182b,0x131c09dd,0x131d4049]
+          addresses=[0x000f1dbc]
           symbols=[]
           for line in Path('symbols.txt').read_text().splitlines():
               fields=line.split(' ',2)
