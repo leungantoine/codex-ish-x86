@@ -1,0 +1,102 @@
+name: Verify SQLite date and floating point on standard iSH
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/sqlite-preflight.yml
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.0
+      - name: Fetch exact upstream locked SQLite source
+        run: |
+          curl -fsSL https://static.crates.io/crates/libsqlite3-sys/libsqlite3-sys-0.37.0.crate -o sqlite.crate
+          echo 'b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1  sqlite.crate' | sha256sum -c -
+          tar -xzf sqlite.crate
+      - name: Build and exercise real SQLite with scalar x87 code
+        run: |
+          cat > probe.c <<'C'
+          #include <assert.h>
+          #include <stdio.h>
+          #include <string.h>
+          #include "sqlite3.h"
+          static void check(sqlite3 *db,const char *sql,const char *expected) {
+            sqlite3_stmt *stmt;
+            assert(sqlite3_prepare_v2(db,sql,-1,&stmt,NULL)==SQLITE_OK);
+            assert(sqlite3_step(stmt)==SQLITE_ROW);
+            const char *actual=(const char *)sqlite3_column_text(stmt,0);
+            if(!actual || strcmp(actual,expected)) {
+              fprintf(stderr,"SQL %s returned %s, expected %s\n",sql,actual?actual:"NULL",expected);
+              assert(0);
+            }
+            assert(sqlite3_step(stmt)==SQLITE_DONE);
+            assert(sqlite3_finalize(stmt)==SQLITE_OK);
+          }
+          int main(void) {
+            sqlite3 *db; assert(sizeof(void *)==4); assert(sqlite3_open(":memory:",&db)==SQLITE_OK);
+            check(db,"SELECT datetime(0,'unixepoch')","1970-01-01 00:00:00");
+            check(db,"SELECT datetime('2000-02-29','+1 day')","2000-03-01 00:00:00");
+            check(db,"SELECT datetime('1900-02-28','+1 day')","1900-03-01 00:00:00");
+            check(db,"SELECT datetime('2026-10-01 23:59:59','+1 second')","2026-10-02 00:00:00");
+            check(db,"SELECT datetime(2461314.5)","2026-10-01 00:00:00");
+            check(db,"SELECT strftime('%Y-%m-%d','9999-12-31')","9999-12-31");
+            check(db,"SELECT printf('%.2f',sqrt(2.0))","1.41");
+            check(db,"SELECT printf('%.3f',1.25*2.5)","3.125");
+            assert(sqlite3_exec(db,"CREATE TABLE t(ts TEXT DEFAULT CURRENT_TIMESTAMP); INSERT INTO t DEFAULT VALUES;",NULL,NULL,NULL)==SQLITE_OK);
+            check(db,"SELECT length(ts) FROM t","19");
+            assert(sqlite3_close(db)==SQLITE_OK);
+            puts("PASS: real ELF32 SQLite x87 date, leap-year, timestamp and floating point checks");
+          }
+          C
+          zig cc -target x86-linux-musl -mcpu=pentium4 -mno-sse -mno-sse2 -fno-sanitize=undefined \
+            -O2 -static -pthread -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_MATH_FUNCTIONS \
+            -Ilibsqlite3-sys-0.37.0/sqlite3 libsqlite3-sys-0.37.0/sqlite3/sqlite3.c probe.c -lm -o sqlite-probe
+          readelf -h sqlite-probe | grep -q 'Class:.*ELF32'
+          if readelf -l sqlite-probe | grep -q INTERP; then exit 1; fi
+          if readelf -d sqlite-probe | grep -q '(NEEDED)'; then exit 1; fi
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static
+          qemu-i386-static sqlite-probe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite-x86-probe
+          path: sqlite-probe
+  runtime:
+    needs: compile
+    runs-on: macos-15
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sqlite-x86-probe
+      - name: Build unmodified released iSH Darwin ARM64 backend
+        run: |
+          brew install meson ninja llvm lld libarchive pkg-config coreutils
+          export PATH="$(brew --prefix llvm)/bin:$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+          export PKG_CONFIG_PATH="$(brew --prefix libarchive)/lib/pkgconfig"
+          sudo hostname ish-x86-test
+          git clone --depth 1 --branch builds/494 https://github.com/ish-app/ish.git emulator
+          test "$(git -C emulator rev-parse HEAD)" = 216cf98a7cda1d68221add374630ede00aae9cd4
+          git -C emulator submodule update --init --depth 1 deps/libapps
+          CC=clang meson setup emulator/build emulator --buildtype=debugoptimized
+          ninja -C emulator/build -j 2 ish tools/fakefsify
+      - name: Run SQLite probe inside standard iSH
+        run: |
+          export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+          mkdir root
+          base=https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86
+          curl -fsSL "$base/alpine-minirootfs-3.23.3-x86.tar.gz" -o alpine.tar.gz
+          curl -fsSL "$base/alpine-minirootfs-3.23.3-x86.tar.gz.sha256" -o alpine.sha256
+          test "$(sha256sum alpine.tar.gz | cut -d ' ' -f1)" = "$(cut -d ' ' -f1 alpine.sha256)"
+          tar -xzf alpine.tar.gz -C root
+          chmod +x sqlite-probe
+          cp sqlite-probe root/
+          tar -czf guest.tar.gz -C root .
+          emulator/build/tools/fakefsify guest.tar.gz guest
+          timeout 120 emulator/build/ish -f guest /sqlite-probe
