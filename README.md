@@ -2,7 +2,7 @@
 
 This repository ports **OpenAI's real Codex CLI** to standard [App Store iSH](https://apps.apple.com/us/app/ish-shell/id1436902243), which emulates 32-bit x86. It is separate from [codex-ish](https://github.com/leungantoine/codex-ish), the ARM64 iSH-AOK project. Neither binary can be used in the other guest architecture.
 
-**Status: real x86 binaries compiled and all standard-iSH model/tool tests passed; release pipeline publication is pending. No installable Release yet.** The workflow must build the real executable and pass static ELF checks, QEMU and standard-iSH shell tests before it publishes a Release. Do not interpret the existence of a workflow or installer as a working port.
+**Status: Codex 0.160.0 built and verified for 32-bit x86.** Static ELF32 checks, QEMU, native Linux, and unmodified standard iSH passed. Physical iOS authentication, interactive tasks, performance and background behavior remain to be tested. [Download the latest Release](https://github.com/leungantoine/codex-ish-x86/releases/latest).
 
 ## Source and target
 
@@ -18,7 +18,7 @@ The package builds `codex`, `codex-responses-api-proxy`, `codex-path/rg`, and `d
 
 ## Install or upgrade with one command
 
-**Use this only after an installable Release appears.** In standard iSH's x86 Alpine root:
+In standard iSH's x86 Alpine root:
 
 ```sh
 apk add --no-cache ca-certificates curl tar coreutils git bash && curl -fsSL --retry 3 https://raw.githubusercontent.com/leungantoine/codex-ish-x86/main/setup.sh -o /tmp/setup-codex-x86.sh && sh /tmp/setup-codex-x86.sh && export PATH="$HOME/.local/bin:$PATH"
@@ -83,6 +83,9 @@ Daemon mode, local V8 execution, and sandboxed Linux execution are unsupported. 
 
 10. The i686 compiler wrapper compiles only `regex_automata` 0.4.13 with `-C opt-level=0`. LLVM's optimized integer bitset comparison emitted `MOVMSKPS`, which standard iSH rejects. CPU features and floating-point ABI stay unchanged. Other crates retain their normal optimization settings. A Cargo release package override also records this setting so cached optimized objects are invalidated. Native compiler invocations receive no wrapper flags. Regex compilation and searching may be slower. The wrapper and its hash are packaged; the focused harness compiles and searches ASCII and Unicode expressions.
 
+11. Add LLVM compiler-rt 19.1.7's atomic size/alignment query at links requesting libatomic; preserve real atomics and OpenSSL's existing lock fallback. Source hash and LLVM license are included.
+12. Compile only `sqlite3.c` with `-O0` to avoid unsupported `CVTDQ2PD` in optimized date conversion. The locked source, CPU features and floating ABI are unchanged. SQLite performance may be lower.
+
 `scripts/prepare-source.py` checks the exact source commit before patching. `compat/PATCHINFO.json` in the archive records source, original Tokio checksum, catalog changes and final patched input hashes. `compat/RUSTSTDINFO.json` and `compat/rust-std.patch` record the runtime source pins and exact patch; Rust licenses are included. Do not apply the ARM64 project's historical overlay to this source.
 
 ## Build and verification
@@ -99,7 +102,9 @@ Required checks before publication:
 6. For GPT-6-Luna, Sol, GPT-6.1-Sol and Astra, a local mock Responses server requests a random-marker shell command. Check the actual marker and exit status 17 return in the next model request, on native Linux and inside iSH. These tests establish the execution path, not authenticated service acceptance or a real model's tool choice.
 7. App-server pipe and PTY shell calls, captured output and exit status 17 inside standard iSH. Installer/startup checks use actual ELF32 executables on Linux; their architecture detection is supplied by a test-only `uname` wrapper.
 
-Only a successful build and emulator verification allow Release publication. Physical-device authentication and shell testing remain an additional check. Recorded preliminary checks: [dependency metadata run 36932313300](https://github.com/leungantoine/codex-ish-x86/actions/runs/36932313300) passed and its generated patch is committed under `metadata/`. [Build attempt 36932975814](https://github.com/leungantoine/codex-ish-x86/actions/runs/36932975814) passed all 62 native PTY tests, all three syscall-fallback harness modes, and a static ELF32 Rust program under QEMU; it stopped on a build-script environment assignment before compiling Codex. That assignment is fixed in the next run. These checks do not establish a working Codex x86 binary. Detailed build and emulator results will be recorded when available.
+Verified in [full build 37057721035](https://github.com/leungantoine/codex-ish-x86/actions/runs/37057721035): 62 PTY tests and 162 Linux sandbox library tests; native subprocess modes for normal Linux, injected EINVAL, fatal EPERM and iSH kernel identity; all four static ELF32 executables and checksums; QEMU version and diagnostics; four actual CLI shell loops using mocked GPT-6/GPT-6.1 tool requests on Linux and unmodified standard iSH; real app-server pipe and PTY output with exit status 17. The final documentation package additionally verifies fresh bash and ash startup PATH, the installed plain `codex` shell loop and repeated installation without duplicate PATH entries. Mocked inference does not establish live service acceptance or account/model access.
+
+Supporting focused checks: [Rust/Tokio and OpenSSL atomics](https://github.com/leungantoine/codex-ish-x86/actions/runs/36952380152), [SQLite date and floating point](https://github.com/leungantoine/codex-ish-x86/actions/runs/36958879061), and [dependency lock metadata](https://github.com/leungantoine/codex-ish-x86/actions/runs/36936516270) passed. Earlier [full build 36952350602](https://github.com/leungantoine/codex-ish-x86/actions/runs/36952350602) exposed SQLite's unsupported optimized conversion; publication was blocked until the replacement build passed.
 
 ## Troubleshooting
 
@@ -111,72 +116,10 @@ codex --version
 
 - `codex: not found`: run `export PATH="$HOME/.local/bin:$PATH"`, or reopen the login shell after setup.
 - `Exec format error`: this package requires 32-bit x86 iSH. ARM64 and x86_64 packages do not work there.
-- Missing Release/download failure: the port has not passed publication gates or connectivity to GitHub failed. Do not bypass checksum errors.
+- Release/download failure: check connectivity to GitHub and the latest Release assets. Do not bypass checksum errors.
 - Slow startup or app termination: keep the app foregrounded, start with a small task, record the operation and crash time. Share private diagnostics safely; never publish authentication files or private task contents.
 - Shell failure: retain the actual error and syscall probe output. QEMU passing alone does not establish iSH support.
 
 ## Maintenance
 
 Inspect the pinned upstream source and dependencies before upgrading. Recreate only still-needed compatibility patches, refresh the matching model catalog, dependency lock metadata and input hashes, compile actual binaries, repeat the verification gates, and then publish. Follow `AGENTS.md` here and in upstream. This is an independent compatibility port, not an official OpenAI or iSH distribution.
-
-### Current compilation finding
-
-The first full attempt compiled static OpenSSL and initial Rust dependencies, then `ring` 0.17.14 rejected the i586 target because it requires SSE/SSE2. The port now uses the canonical i686 musl target with a Pentium 4 / SSE2 baseline. This does not establish emulator compatibility; execution in released standard iSH remains a publication gate.
-
-### Standard iSH runtime findings
-
-[Preflight run 36936566523](https://github.com/leungantoine/codex-ish-x86/actions/runs/36936566523) passed actual ELF32 Rust startup, clock, floating point, four worker threads, and real worker shell commands returning output and exit status 17 inside unmodified standard iSH 494. The minimal test root filesystem needed `/dev/null` and the other device nodes normally supplied by the iOS app. This test did not run a finished Codex binary.
-
-The same run's raw diagnostic probe then encountered `SIGSYS` on missing `pidfd_open` (syscall 434). The new Tokio kernel check avoids that call on iSH; a focused native and standard-iSH Tokio harness is testing this patch before the next full build. [Dependency metadata run 36936516270](https://github.com/leungantoine/codex-ish-x86/actions/runs/36936516270) passed with BLAKE3's `pure` feature; the regenerated Bazel lock patch was identical.
-
-### Host timing differences
-
-The unmodified 494 Linux-hosted CLI creates futex conditions with the default realtime clock but calculates timed waits using a monotonic timestamp. A 50 ms condition wait therefore expired immediately in the Linux emulator. The iOS/Darwin path uses `pthread_cond_timedwait_relative_np` instead. The final standard-iSH checks use the unmodified Darwin ARM64 backend to exercise the app's timing and CPU paths; no emulator source workaround is applied. Normal Linux behavior is separately checked with QEMU and native ELF32 execution. These remain cloud tests, with no UIKit, device authentication, or physical iOS memory/background verification.
-
-[Darwin runtime run 36940632684](https://github.com/leungantoine/codex-ish-x86/actions/runs/36940632684) passed startup and worker shell commands on the unmodified ARM64 emulator. The rebuilt runtime correctly waited for a 50 ms timeout, then exposed missing `clock_nanosleep` (267) in a worker sleep. The next runtime patch selects supported `nanosleep` on iSH before that call. [Full build 36936516185](https://github.com/leungantoine/codex-ish-x86/actions/runs/36936516185) compiled Codex core but failed in upstream seccompiler callers that assumed 64-bit syscall constants; the x86 path now returns an explicit unsupported-architecture error. These fixes require further verification; no finished binary is claimed.
-
-### Focused runtime verification passed
-
-[Darwin runtime verification 36942647548](https://github.com/leungantoine/codex-ish-x86/actions/runs/36942647548) passed with the unmodified iSH 494 source and default logging, using the exact rebuilt ELF32 probes from [36942031271](https://github.com/leungantoine/codex-ish-x86/actions/runs/36942031271). It verified startup, clocks, floating point, worker threads, 50 ms timed waits, notifications after sleep, 20 real worker shell commands with stdout/stderr and exit status 17, ENOENT and EPERM subprocess errors, and kill/reap cleanup. The diagnostic confirmed normal SIGCHLD registration and the iSH pidfd bypass. Native injected error modes and the rebuilt runtime under QEMU also passed. This is a runtime harness result; full Codex CLI compilation and tool-loop verification remain pending.
-
-Enabling the released emulator's optional syscall trace logger under the cloud compiler caused query-only `rt_sigaction` calls to fail with EFAULT. Its log expression reads an uninitialized action when the input pointer is null. The exact same guest binaries passed with default logging; no emulator source was changed. Verification uses default logging and records guest stderr separately. The disposable macOS runner also uses a short hostname to fit the guest's 65-byte uname field.
-
-### Final link finding
-
-[Build 36941651734](https://github.com/leungantoine/codex-ish-x86/actions/runs/36941651734) passed all 62 PTY and 162 Linux sandbox library tests, compiled the complete real Rust CLI and dependencies, then failed at final linking because Zig's empty libatomic lacks `__atomic_is_lock_free`, referenced by OpenSSL. The x86 linker now adds the query subset of [LLVM compiler-rt 19.1.7](https://github.com/llvm/llvm-project/blob/llvmorg-19.1.7/compiler-rt/lib/builtins/atomic.c). It uses the target compiler's atomic capability and pointer alignment to preserve the choice between real atomics and OpenSSL's existing locks. The source hash and LLVM license are packaged. A concurrent 32-bit probe verifies aligned atomics, the 4-byte-aligned 64-bit locking fallback, and SHA256 before the CLI link. The compiled Rust cache was saved; the retry still must pass all release gates.
-
-### Atomic and runtime verification passed
-
-[Focused verification 36952380152](https://github.com/leungantoine/codex-ish-x86/actions/runs/36952380152) passed both QEMU and the unmodified standard iSH 494 Darwin ARM64 backend. The exact static OpenSSL 3.6.4 library linked successfully with the LLVM query. Four concurrent workers completed 4,000 aligned atomic updates and 4,000 updates using the existing lock fallback, with SHA256 digest checks. The rebuilt Rust/Tokio harness also passed timed waits, notifications, 20 worker shell commands, error propagation and cleanup. This verifies the runtime and atomic fix; the full Codex build and its CLI tool tests remain in progress.
-
-### Full binary and SQLite findings
-
-[Full build 36952350602](https://github.com/leungantoine/codex-ish-x86/actions/runs/36952350602) produced the actual CLI, proxy, ripgrep and diagnostic executables. All four passed ELF32, static-link and checksum checks, and the CLI reported `codex-cli 0.160.0` under QEMU and inside unmodified standard iSH. Native Linux passed all four mocked model tool loops and the installed `codex` launcher. Publication was correctly blocked because the first standard-iSH model loop hit unsupported `CVTDQ2PD` in SQLite's `computeYMD_HMS` date conversion. [Binary inspection 36958418972](https://github.com/leungantoine/codex-ish-x86/actions/runs/36958418972) identified the exact function and instruction.
-
-[SQLite verification 36958879061](https://github.com/leungantoine/codex-ish-x86/actions/runs/36958879061) passed real date, leap-year, Julian-day, current-timestamp and floating-point checks under QEMU and unmodified standard iSH. The compiler wrapper now appends `-O0` only when compiling `sqlite3.c`; the locked SQLite source, CPU features and floating-point ABI are unchanged. Rust and the other C libraries keep their optimization settings. SQLite performance may be lower; physical-device performance remains untested. An earlier experiment disabling SSE for SQLite failed its QEMU check and is not used. The complete CLI is being rebuilt with the verified SQLite setting and must repeat all release gates.
-
-### Event notification fence finding
-
-The restarted [build 36959204334](https://github.com/leungantoine/codex-ish-x86/actions/runs/36959204334) passed compilation, static checks and all native model-tool/installer tests with the SQLite fix. Standard iSH then rejected `LOCK NOT` in event-listener's hand-written notification fence. [Binary inspection 36970010378](https://github.com/leungantoine/codex-ish-x86/actions/runs/36970010378) identified the exact operation. The patched 32-bit fence uses supported `LOCK OR` and preserves the full barrier. The existing harness now checks 20 notifications with shared-memory visibility and 200 bounded-channel messages from four concurrent producers, in addition to its subprocess checks. These changes still require the new build and emulator verification before publication.
-
-### Unbounded queue fence finding
-
-[Build 36971004602](https://github.com/leungantoine/codex-ish-x86/actions/runs/36971004602) produced all four binaries and passed static, QEMU, native model-tool and installer checks. Its full iSH loop exposed the same unsupported `LOCK NOT` in `concurrent-queue` 2.5.0's unbounded queue, confirmed by [binary inspection 36980097401](https://github.com/leungantoine/codex-ish-x86/actions/runs/36980097401). This crate now receives the same checksum-verified 32-bit locked OR fence patch, retaining the full barrier and declaring flag changes. The focused harness tests both bounded and unbounded channels with four concurrent producers and 200 unique messages each. Final CLI verification is still required before publication. The earlier event notification/runtime harness passed on rerun; two additional ordinary runs passed, while one initial native emulator SIGSEGV remains unexplained.
-
-### Regex and descriptor cleanup finding
-
-[Build 36980443112](https://github.com/leungantoine/codex-ish-x86/actions/runs/36980443112) completed in about an hour with cache reuse, produced all binaries, and passed native model-tool/installer checks. The standard-iSH test reached the advertised model tool request after the queue fixes, then exposed missing `close_range` (436) in child startup and unsupported `MOVMSKPS` in `regex_automata::hybrid::dfa::Config::byte_classes_from_nfa`. [Binary inspection 36986303023](https://github.com/leungantoine/codex-ish-x86/actions/runs/36986303023) confirmed the latter instruction and function. The narrow changes above need full rebuild and emulator checks before publication; no installable Release is claimed yet.
-
-### Scoped regex and descriptor cleanup verification passed
-
-Disabling LLVM's automatic vectorization passes alone still emitted `MOVMSKPS`; the focused gate rejected that candidate. [Scoped optimization verification 36988417346](https://github.com/leungantoine/codex-ish-x86/actions/runs/36988417346) passed the real regex compiler and ASCII/Unicode searches, 20 worker shell commands using the actual descriptor cleanup fallback, output/error/exit and reaping checks, notifications, concurrent bounded/unbounded channels, clocks, and OpenSSL atomics under unmodified standard iSH. Native injected modes and QEMU also passed. The full build now applies only `regex_automata`'s i686 optimization override; final real CLI tool-loop verification remains required before publication.
-
-### Regex cache invalidation finding
-
-[Build 36989446763](https://github.com/leungantoine/codex-ish-x86/actions/runs/36989446763) built the complete CLI and passed native checks, but the full iSH loop still encountered the optimized regex instruction. Its compilation log shows that Cargo reused the existing regex-automata object: changing flags inside `RUSTC_WRAPPER` was invisible to Cargo's dependency fingerprint. The source preparation now adds the matching Cargo release package profile (`regex-automata`, optimization 0), so the effective setting is tracked by Cargo. The focused fresh build had passed this setting; the full cached build must still pass before any Release is published.
-
-### Complete standard-iSH CLI verification passed
-
-[Verification 37055112866](https://github.com/leungantoine/codex-ish-x86/actions/runs/37055112866) tested the exact binaries from [build 36997697773](https://github.com/leungantoine/codex-ish-x86/actions/runs/36997697773) in unmodified standard iSH 494 under an Alpine parent shell, matching normal app launch. All four GPT-6/GPT-6.1 mocked model tool loops executed a real shell command, returned its unique output and exit status 17 to the model, and ended with Codex status 0. App-server pipe and PTY tests also passed.
-
-The earlier direct-as-PID-1 emulator launch executed the command successfully but reported a worker's shutdown SIGKILL through the CLI exit hook. Its released source's [exit handler](https://github.com/ish-app/ish/blob/216cf98a7cda1d68221add374630ede00aae9cd4/xX_main_Xx.h) forwards the last parentless task's status; a normal guest parent shell waits for the process group's actual status. The verification now retains that parent and forwards its exact child status. No emulator patch or ignored nonzero exit code is used. This remains cloud emulator verification, with no physical iOS authentication, UI, memory or background-stability claim. Publication remains gated on the full pipeline.
