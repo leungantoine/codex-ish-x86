@@ -75,10 +75,26 @@ s = s.replace(anchor, """        // Standard iSH raises SIGSYS for missing pidfd
 """ + anchor)
 pidfd.write_text(s)
 
+# Preserve the full memory barrier using the supported locked OR instruction.
+# event-listener's x86-64 fence stays unchanged.
+event = next(p for p in tomllib.loads(lock_text)["package"] if p["name"] == "event-listener")
+assert event["version"] == "5.4.1"
+assert event["checksum"] == "e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab"
+data = urllib.request.urlopen("https://static.crates.io/crates/event-listener/event-listener-5.4.1.crate", timeout=60).read()
+assert hashlib.sha256(data).hexdigest() == event["checksum"]
+with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+    archive.extractall(vendor, filter="data")
+notify = vendor / "event-listener-5.4.1/src/notify.rs"
+s = notify.read_text()
+old = 'asm!("lock not dword ptr [{0:e}]", in(reg) a.get(), options(nostack, preserves_flags));'
+new = 'asm!("lock or dword ptr [{0:e}], 0", in(reg) a.get(), options(nostack));'
+assert s.count(old) == 1
+notify.write_text(s.replace(old, new))
+
 manifest = root / "codex-rs/Cargo.toml"
 s = manifest.read_text()
 assert s.count("[patch.crates-io]") == 1
-s = s.replace("[patch.crates-io]", '[patch.crates-io]\ntokio = { path = "vendor/tokio-1.52.3" }')
+s = s.replace("[patch.crates-io]", '[patch.crates-io]\ntokio = { path = "vendor/tokio-1.52.3" }\nevent-listener = { path = "vendor/event-listener-5.4.1" }')
 assert s.count('blake3 = "1.8.2"') == 1
 # The upstream pure feature omits the AVX-512 C backend; Rust implementations
 # still select supported instruction sets at runtime in the x86 emulator.
@@ -87,7 +103,7 @@ s += "\n[profile.release.package.zbus]\ncodegen-units = 1\n\n[profile.release.pa
 manifest.write_text(s)
 blocks = lock_text.split("[[package]]")
 for i, block in enumerate(blocks):
-    if '\nname = "tokio"\n' in block:
+    if '\nname = "tokio"\n' in block or '\nname = "event-listener"\n' in block:
         blocks[i] = "\n".join(line for line in block.split("\n") if not line.startswith(("source = ", "checksum = ")))
 lock_path.write_text("[[package]]".join(blocks))
 
@@ -130,7 +146,7 @@ compat.mkdir()
     "patched_source_sha256": {
         str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
         for p in (root / "codex-rs/utils/pty/src/process_group.rs", pidfd,
-                  manifest, lock_path, landlock, compat / "models-direct.json")
+                  manifest, lock_path, landlock, notify, compat / "models-direct.json")
     },
 }, indent=2) + "\n")
 print("Prepared checked source, Tokio, manifests, and direct models:", changed)
@@ -157,6 +173,8 @@ assert sqlite["checksum"] == "b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec2
 info["sqlite_registry_sha256"] = sqlite["checksum"]
 info["sqlite_codegen_policy"] = "Only sqlite3.c uses -O0 to avoid unsupported CVTDQ2PD; CPU features and floating ABI unchanged"
 info["zigcc_sha256"] = hashlib.sha256((kit / "build-tools/zigcc").read_bytes()).hexdigest()
+info["event_listener_registry_sha256"] = event["checksum"]
+info["event_listener_fence_policy"] = "32-bit locked OR preserves full memory barrier; x86-64 locked NOT unchanged; flags clobber declared"
 info["blake3_features"] = ["pure"]
 info["standard_ish_pidfd_policy"] = "uname release suffix -ish selects SIGCHLD before pidfd_open"
 info["omitted_executables"] = ["codex-code-mode-host"]

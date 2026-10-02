@@ -47,6 +47,9 @@ jobs:
           assert info['sqlite_registry_sha256']=='b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1'
           assert 'Only sqlite3.c uses -O0' in info['sqlite_codegen_policy']
           assert hashlib.sha256((p/'compat/zigcc').read_bytes()).hexdigest()==info['zigcc_sha256']
+          assert info['event_listener_registry_sha256']=='e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab'
+          assert 'full memory barrier' in info['event_listener_fence_policy']
+          assert hashlib.sha256((p/'compat/event-listener-notify.rs').read_bytes()).hexdigest()==info['patched_source_sha256']['codex-rs/vendor/event-listener-5.4.1/src/notify.rs']
           PY
           (cd package && sha256sum codex codex-responses-api-proxy codex-path/rg diagnostics/ish-syscall-probe > "$RUNNER_TEMP/executables.sha256")
       - name: Record successful real build and emulator results in the guide
@@ -66,9 +69,9 @@ jobs:
                       'In standard iSH\'s x86 Alpine root:')
           anchor='`scripts/prepare-source.py` checks'
           position=s.index(anchor)
-          s=s[:position]+('8. Add LLVM compiler-rt 19.1.7\'s atomic size/alignment query at links requesting libatomic; '
+          s=s[:position]+('9. Add LLVM compiler-rt 19.1.7\'s atomic size/alignment query at links requesting libatomic; '
               'preserve real atomics and OpenSSL\'s existing lock fallback. Source hash and LLVM license are included.\n'
-              '9. Compile only `sqlite3.c` with `-O0` to avoid unsupported `CVTDQ2PD` in optimized date conversion. '
+              '10. Compile only `sqlite3.c` with `-O0` to avoid unsupported `CVTDQ2PD` in optimized date conversion. '
               'The locked source, CPU features and floating ABI are unchanged. SQLite performance may be lower.\n\n')+s[position:]
           # Keep a concise durable history; the detailed failed-run logs remain linked.
           if '\n### Current compilation finding' in s:

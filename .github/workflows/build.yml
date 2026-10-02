@@ -56,6 +56,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             upstream/codex-rs/target
+            .build-input-mtimes.json
           key: ish-x86-1600-rust195-zig014-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ish-x86-1600-rust195-zig014-
       - uses: taiki-e/install-action@v2
@@ -63,7 +64,9 @@ jobs:
           tool: just,cargo-nextest,uv,dotslash
       - name: Format and test patched PTY sources
         run: |
-          (cd upstream && just fmt && just test -p codex-utils-pty && just test -p codex-linux-sandbox --lib)
+          (cd upstream && just fmt)
+          python3 scripts/cache-input-mtimes.py restore upstream .build-input-mtimes.json
+          (cd upstream && just test -p codex-utils-pty && just test -p codex-linux-sandbox --lib)
           ISH_PATCHED_SOURCE="$PWD/upstream" bash tests/verify-subprocess.sh
           python3 scripts/record-patchinfo.py upstream
       - name: Verify the 32-bit Rust and Zig linker before the full build
@@ -98,13 +101,17 @@ jobs:
             dist/codex-ish-x86.tar.gz
             dist/codex-ish-x86.tar.gz.sha256
           if-no-files-found: error
+      - name: Capture content-verified build inputs for the next incremental build
+        if: '!cancelled()'
+        run: python3 scripts/cache-input-mtimes.py capture upstream .build-input-mtimes.json
       - uses: actions/cache/save@v4
-        if: always()
+        if: '!cancelled()'
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             upstream/codex-rs/target
+            .build-input-mtimes.json
           key: ish-x86-1600-rust195-zig014-${{ github.run_id }}-${{ github.run_attempt }}
   verify:
     needs: build

@@ -20,6 +20,7 @@ export GITHUB_ENV=$(mktemp)
 trap 'rm -f "$GITHUB_ENV"' EXIT
 cd "$source_root"
 python3 "$kit/scripts/prepare-rust-std.py" "$source_root/ish-compat"
+python3 "$kit/scripts/cache-input-mtimes.py" restore "$source_root" "$kit/.build-input-mtimes.json"
 OPENSSL_CC="$CC" OPENSSL_BUILD_JOBS=2 bash .github/scripts/install-musl-openssl.sh
 set -a
 source "$GITHUB_ENV"
@@ -42,6 +43,7 @@ test -n "$sqlite_source"
 qemu-i386-static "$RUNNER_TEMP/sqlite-runtime-probe"
 package="$kit/dist/codex-ish-x86"
 mkdir -p "$package"/{codex-path,codex-resources,diagnostics,compat,licenses/ripgrep,licenses/rust,licenses/llvm}
+mkdir -p "$package/licenses/event-listener"
 for name in codex codex-responses-api-proxy; do
   install -m 0755 "codex-rs/target/$TARGET/release/$name" "$package/$name"
 done
@@ -57,6 +59,9 @@ cp "$kit/licenses/rust/"* "$package/licenses/rust/"
 cp "$kit/licenses/llvm/LICENSE.TXT" "$package/licenses/llvm/"
 cp "$kit/build-tools/atomic-query.c" "$package/compat/"
 cp "$kit/build-tools/zigcc" "$package/compat/zigcc"
+cp codex-rs/vendor/event-listener-5.4.1/src/notify.rs "$package/compat/event-listener-notify.rs"
+find codex-rs/vendor/event-listener-5.4.1 -maxdepth 1 -iname '*license*' -type f -exec cp {} "$package/licenses/event-listener/" \;
+test -n "$(find "$package/licenses/event-listener" -type f -print -quit)"
 rg_source=$(find "$HOME/.cargo/registry/src" -type d -name ripgrep-15.2.0 -print -quit)
 for name in COPYING LICENSE-MIT UNLICENSE; do cp "$rg_source/$name" "$package/licenses/ripgrep/"; done
 cat > "$package/BUILDINFO" <<INFO
@@ -70,6 +75,7 @@ Ripgrep: 15.2.0, built from its locked source crate
 Rust std: rebuilt from exact 1.95.0 source; iSH socket error-channel, sleep and ENOSYS futex fallbacks
 Atomic query: LLVM compiler-rt 19.1.7 size/alignment query; Zig link compatibility
 SQLite: locked libsqlite3-sys 0.37.0; sqlite3.c only uses -O0 to avoid unsupported CVTDQ2PD
+Event listener: locked 5.4.1 source; 32-bit full fence uses LOCK OR; x86-64 unchanged
 BLAKE3: upstream pure feature, AVX-512 C backend omitted
 Direct tools; no V8 host, daemon, or Linux sandbox support in standard iSH.
 Physical iOS authentication, performance, and background behavior require device tests.

@@ -6,6 +6,8 @@ on:
       - .github/workflows/preflight.yml
       - build-tools/**
       - tests/atomic-runtime-probe.c
+      - tests/verify-subprocess.sh
+      - scripts/prepare-source.py
 permissions:
   contents: read
 jobs:
