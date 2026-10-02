@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - .github/workflows/preflight.yml
+      - build-tools/**
+      - tests/atomic-runtime-probe.c
 permissions:
   contents: read
 jobs:
