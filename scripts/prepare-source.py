@@ -151,6 +151,12 @@ info["x86_seccomp_policy"] = "Unsupported x86 filter requests fail with InvalidT
 info["atomic_query_original_sha256"] = "9fcf5fc6f0cb1da23f004fa9bc3af1cfcb5589f0c8d20e7b6de863591b60eb98"
 info["atomic_query_sha256"] = hashlib.sha256((kit / "build-tools/atomic-query.c").read_bytes()).hexdigest()
 info["target"] = "i686-unknown-linux-musl"
+sqlite = next(p for p in tomllib.loads(lock_path.read_text())["package"] if p["name"] == "libsqlite3-sys")
+assert sqlite["version"] == "0.37.0"
+assert sqlite["checksum"] == "b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1"
+info["sqlite_registry_sha256"] = sqlite["checksum"]
+info["sqlite_codegen_policy"] = "Only sqlite3.c uses -O0 to avoid unsupported CVTDQ2PD; CPU features and floating ABI unchanged"
+info["zigcc_sha256"] = hashlib.sha256((kit / "build-tools/zigcc").read_bytes()).hexdigest()
 info["blake3_features"] = ["pure"]
 info["standard_ish_pidfd_policy"] = "uname release suffix -ish selects SIGCHLD before pidfd_open"
 info["omitted_executables"] = ["codex-code-mode-host"]

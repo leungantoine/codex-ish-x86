@@ -34,6 +34,12 @@ qemu-i386-static "$RUNNER_TEMP/atomic-runtime-probe"
 RUSTC_BOOTSTRAP=1 cargo -Z build-std=std,panic_abort build --manifest-path codex-rs/Cargo.toml --locked --release --target "$TARGET" -j 1 \
   --bin codex --bin codex-responses-api-proxy
 RUSTC_BOOTSTRAP=1 cargo -Z build-std=std,panic_abort install ripgrep --version 15.2.0 --locked --target "$TARGET" --root "$RUNNER_TEMP/rg-x86" -j 1
+sqlite_source=$(find "$HOME/.cargo/registry/src" -type d -name libsqlite3-sys-0.37.0 -print -quit)
+test -n "$sqlite_source"
+"$CC" -O2 -static -pthread -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_MATH_FUNCTIONS \
+  -I"$sqlite_source/sqlite3" "$sqlite_source/sqlite3/sqlite3.c" \
+  "$kit/tests/sqlite-runtime-probe.c" -lm -o "$RUNNER_TEMP/sqlite-runtime-probe"
+qemu-i386-static "$RUNNER_TEMP/sqlite-runtime-probe"
 package="$kit/dist/codex-ish-x86"
 mkdir -p "$package"/{codex-path,codex-resources,diagnostics,compat,licenses/ripgrep,licenses/rust,licenses/llvm}
 for name in codex codex-responses-api-proxy; do
@@ -50,6 +56,7 @@ cp "$kit/setup.sh" "$package/setup.sh"
 cp "$kit/licenses/rust/"* "$package/licenses/rust/"
 cp "$kit/licenses/llvm/LICENSE.TXT" "$package/licenses/llvm/"
 cp "$kit/build-tools/atomic-query.c" "$package/compat/"
+cp "$kit/build-tools/zigcc" "$package/compat/zigcc"
 rg_source=$(find "$HOME/.cargo/registry/src" -type d -name ripgrep-15.2.0 -print -quit)
 for name in COPYING LICENSE-MIT UNLICENSE; do cp "$rg_source/$name" "$package/licenses/ripgrep/"; done
 cat > "$package/BUILDINFO" <<INFO
@@ -62,6 +69,7 @@ OpenSSL: 3.6.4, upstream SHA-256 verified, portable C, static musl
 Ripgrep: 15.2.0, built from its locked source crate
 Rust std: rebuilt from exact 1.95.0 source; iSH socket error-channel, sleep and ENOSYS futex fallbacks
 Atomic query: LLVM compiler-rt 19.1.7 size/alignment query; Zig link compatibility
+SQLite: locked libsqlite3-sys 0.37.0; sqlite3.c only uses -O0 to avoid unsupported CVTDQ2PD
 BLAKE3: upstream pure feature, AVX-512 C backend omitted
 Direct tools; no V8 host, daemon, or Linux sandbox support in standard iSH.
 Physical iOS authentication, performance, and background behavior require device tests.

@@ -2,7 +2,7 @@
 
 This repository ports **OpenAI's real Codex CLI** to standard [App Store iSH](https://apps.apple.com/us/app/ish-shell/id1436902243), which emulates 32-bit x86. It is separate from [codex-ish](https://github.com/leungantoine/codex-ish), the ARM64 iSH-AOK project. Neither binary can be used in the other guest architecture.
 
-**Status: build and compatibility verification in progress. No finished x86 binary is claimed yet.** The workflow must build the real executable and pass static ELF checks, QEMU and standard-iSH shell tests before it publishes a Release. Do not interpret the existence of a workflow or installer as a working port.
+**Status: real x86 binaries compiled; standard iSH compatibility verification is in progress. No installable Release yet.** The workflow must build the real executable and pass static ELF checks, QEMU and standard-iSH shell tests before it publishes a Release. Do not interpret the existence of a workflow or installer as a working port.
 
 ## Source and target
 
@@ -142,3 +142,9 @@ Enabling the released emulator's optional syscall trace logger under the cloud c
 ### Atomic and runtime verification passed
 
 [Focused verification 36952380152](https://github.com/leungantoine/codex-ish-x86/actions/runs/36952380152) passed both QEMU and the unmodified standard iSH 494 Darwin ARM64 backend. The exact static OpenSSL 3.6.4 library linked successfully with the LLVM query. Four concurrent workers completed 4,000 aligned atomic updates and 4,000 updates using the existing lock fallback, with SHA256 digest checks. The rebuilt Rust/Tokio harness also passed timed waits, notifications, 20 worker shell commands, error propagation and cleanup. This verifies the runtime and atomic fix; the full Codex build and its CLI tool tests remain in progress.
+
+### Full binary and SQLite findings
+
+[Full build 36952350602](https://github.com/leungantoine/codex-ish-x86/actions/runs/36952350602) produced the actual CLI, proxy, ripgrep and diagnostic executables. All four passed ELF32, static-link and checksum checks, and the CLI reported `codex-cli 0.160.0` under QEMU and inside unmodified standard iSH. Native Linux passed all four mocked model tool loops and the installed `codex` launcher. Publication was correctly blocked because the first standard-iSH model loop hit unsupported `CVTDQ2PD` in SQLite's `computeYMD_HMS` date conversion. [Binary inspection 36958418972](https://github.com/leungantoine/codex-ish-x86/actions/runs/36958418972) identified the exact function and instruction.
+
+[SQLite verification 36958879061](https://github.com/leungantoine/codex-ish-x86/actions/runs/36958879061) passed real date, leap-year, Julian-day, current-timestamp and floating-point checks under QEMU and unmodified standard iSH. The compiler wrapper now appends `-O0` only when compiling `sqlite3.c`; the locked SQLite source, CPU features and floating-point ABI are unchanged. Rust and the other C libraries keep their optimization settings. SQLite performance may be lower; physical-device performance remains untested. An earlier experiment disabling SSE for SQLite failed its QEMU check and is not used. The complete CLI is being rebuilt with the verified SQLite setting and must repeat all release gates.
