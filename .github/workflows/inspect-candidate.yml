@@ -14,7 +14,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: codex-ish-x86
-          run-id: 36952350602
+          run-id: 36959204334
           github-token: ${{ github.token }}
       - name: Inspect actual completed x86 binary
         run: |
@@ -22,11 +22,11 @@ jobs:
           mkdir package
           tar -xzf codex-ish-x86.tar.gz -C package
           package/codex --version
-          objdump -d -C --start-address=0x100508e0 --stop-address=0x10050a40 package/codex
+          objdump -d -C --start-address=0x0d228830 --stop-address=0x0d2288b0 package/codex
           nm -n -C package/codex > symbols.txt
           python3 - <<'PY'
           from pathlib import Path
-          addresses=[0x100509a8,0x1004cf5d,0x1004e2a0,0x0ffa0829,0x0ff9f483]
+          addresses=[0x0d22887e,0x0c931217,0x0c9c21b2,0x0f55a037]
           symbols=[]
           for line in Path('symbols.txt').read_text().splitlines():
               fields=line.split(' ',2)
