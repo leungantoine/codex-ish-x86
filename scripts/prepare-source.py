@@ -218,7 +218,7 @@ regex_automata = next(p for p in tomllib.loads(lock_text)["package"] if p["name"
 assert regex_automata["version"] == "0.4.13"
 assert regex_automata["checksum"] == "5276caf25ac86c8d810222b3dbb938e512c55c6831a10f3e6ed1c93b84041f1c"
 info["regex_automata_registry_sha256"] = regex_automata["checksum"]
-info["regex_automata_codegen_policy"] = "Only i686 regex_automata disables automatic loop and SLP vectorization to avoid MOVMSKPS; optimization level, CPU features and ABI unchanged"
+info["regex_automata_codegen_policy"] = "Only i686 regex_automata uses opt-level=0 to avoid MOVMSKPS; other crates, CPU features and ABI unchanged"
 info["rustc_wrapper_sha256"] = hashlib.sha256((kit / "build-tools/rustc-wrapper").read_bytes()).hexdigest()
 info["blake3_features"] = ["pure"]
 info["standard_ish_pidfd_policy"] = "uname release suffix -ish selects SIGCHLD before pidfd_open"

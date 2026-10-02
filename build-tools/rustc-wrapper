@@ -18,8 +18,8 @@ for arg do
 done
 # LLVM auto-vectorizes an integer bitset comparison into MOVMSKPS, which
 # released iSH does not decode. Keep this crate's target features and ABI;
-# suppress only the two automatic vectorization passes for its x86 build.
+# compile only this crate's x86 build at optimization level zero.
 if [ "$crate_name" = regex_automata ] && [ "$target" = i686-unknown-linux-musl ]; then
-    exec "$compiler" "$@" -C no-vectorize-loops -C no-vectorize-slp
+    exec "$compiler" "$@" -C opt-level=0
 fi
 exec "$compiler" "$@"
