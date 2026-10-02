@@ -86,7 +86,7 @@ BLAKE3: upstream pure feature, AVX-512 C backend omitted
 Direct tools; no V8 host, daemon, or Linux sandbox support in standard iSH.
 Physical iOS authentication, performance, and background behavior require device tests.
 Descriptor cleanup: iSH uses upstream stack-only /proc fallback before unsupported close_range
-Regex-automata: i686 crate only uses optimization level zero; other crates, CPU and ABI unchanged
+Regex-automata: optimization zero recorded in Cargo package profile and i686 wrapper; other crates, CPU and ABI unchanged
 Concurrent-queue: checksum-pinned 2.5.0; 32-bit LOCK OR full barrier; x86-64 unchanged
 INFO
 (cd "$package" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)

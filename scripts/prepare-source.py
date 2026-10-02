@@ -113,6 +113,7 @@ assert s.count('blake3 = "1.8.2"') == 1
 # still select supported instruction sets at runtime in the x86 emulator.
 s = s.replace('blake3 = "1.8.2"', 'blake3 = { version = "1.8.2", features = ["pure"] }')
 s += "\n[profile.release.package.zbus]\ncodegen-units = 1\n\n[profile.release.package.codex-model-provider]\ncodegen-units = 1\n"
+s += "\n[profile.release.package.regex-automata]\nopt-level = 0\n"
 manifest.write_text(s)
 blocks = lock_text.split("[[package]]")
 for i, block in enumerate(blocks):
@@ -218,7 +219,7 @@ regex_automata = next(p for p in tomllib.loads(lock_text)["package"] if p["name"
 assert regex_automata["version"] == "0.4.13"
 assert regex_automata["checksum"] == "5276caf25ac86c8d810222b3dbb938e512c55c6831a10f3e6ed1c93b84041f1c"
 info["regex_automata_registry_sha256"] = regex_automata["checksum"]
-info["regex_automata_codegen_policy"] = "Only i686 regex_automata uses opt-level=0 to avoid MOVMSKPS; other crates, CPU features and ABI unchanged"
+info["regex_automata_codegen_policy"] = "Only i686 regex_automata uses opt-level=0 via wrapper; Cargo package profile records opt-level=0 for cache invalidation; other crates, CPU features and ABI unchanged"
 info["rustc_wrapper_sha256"] = hashlib.sha256((kit / "build-tools/rustc-wrapper").read_bytes()).hexdigest()
 info["blake3_features"] = ["pure"]
 info["standard_ish_pidfd_policy"] = "uname release suffix -ish selects SIGCHLD before pidfd_open"
