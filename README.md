@@ -2,7 +2,7 @@
 
 This repository ports **OpenAI's real Codex CLI** to standard [App Store iSH](https://apps.apple.com/us/app/ish-shell/id1436902243), which emulates 32-bit x86. It is separate from [codex-ish](https://github.com/leungantoine/codex-ish), the ARM64 iSH-AOK project. Neither binary can be used in the other guest architecture.
 
-**Status: real x86 binaries compiled; standard iSH compatibility verification is in progress. No installable Release yet.** The workflow must build the real executable and pass static ELF checks, QEMU and standard-iSH shell tests before it publishes a Release. Do not interpret the existence of a workflow or installer as a working port.
+**Status: real x86 binaries compiled and all standard-iSH model/tool tests passed; release pipeline publication is pending. No installable Release yet.** The workflow must build the real executable and pass static ELF checks, QEMU and standard-iSH shell tests before it publishes a Release. Do not interpret the existence of a workflow or installer as a working port.
 
 ## Source and target
 
@@ -174,3 +174,9 @@ Disabling LLVM's automatic vectorization passes alone still emitted `MOVMSKPS`; 
 ### Regex cache invalidation finding
 
 [Build 36989446763](https://github.com/leungantoine/codex-ish-x86/actions/runs/36989446763) built the complete CLI and passed native checks, but the full iSH loop still encountered the optimized regex instruction. Its compilation log shows that Cargo reused the existing regex-automata object: changing flags inside `RUSTC_WRAPPER` was invisible to Cargo's dependency fingerprint. The source preparation now adds the matching Cargo release package profile (`regex-automata`, optimization 0), so the effective setting is tracked by Cargo. The focused fresh build had passed this setting; the full cached build must still pass before any Release is published.
+
+### Complete standard-iSH CLI verification passed
+
+[Verification 37055112866](https://github.com/leungantoine/codex-ish-x86/actions/runs/37055112866) tested the exact binaries from [build 36997697773](https://github.com/leungantoine/codex-ish-x86/actions/runs/36997697773) in unmodified standard iSH 494 under an Alpine parent shell, matching normal app launch. All four GPT-6/GPT-6.1 mocked model tool loops executed a real shell command, returned its unique output and exit status 17 to the model, and ended with Codex status 0. App-server pipe and PTY tests also passed.
+
+The earlier direct-as-PID-1 emulator launch executed the command successfully but reported a worker's shutdown SIGKILL through the CLI exit hook. Its released source's [exit handler](https://github.com/ish-app/ish/blob/216cf98a7cda1d68221add374630ede00aae9cd4/xX_main_Xx.h) forwards the last parentless task's status; a normal guest parent shell waits for the process group's actual status. The verification now retains that parent and forwards its exact child status. No emulator patch or ignored nonzero exit code is used. This remains cloud emulator verification, with no physical iOS authentication, UI, memory or background-stability claim. Publication remains gated on the full pipeline.
