@@ -15,8 +15,9 @@ for arg in "${args[@]}"; do
 done
 if ((needs_query)); then
   tool_dir=$(cd "$(dirname "$0")" && pwd)
-  query_object=$(mktemp "${TMPDIR:-/tmp}/codex-atomic-query.XXXXXX")
-  trap 'rm -f "$query_object"' EXIT
+  query_dir=$(mktemp -d "${TMPDIR:-/tmp}/codex-atomic-query.XXXXXX")
+  query_object="$query_dir/query.o"
+  trap 'rm -rf "$query_dir"' EXIT
   zig cc -target x86-linux-musl -mcpu=pentium4 -O2 -fno-sanitize=undefined \
     -c "$tool_dir/atomic-query.c" -o "$query_object"
   zig cc -target x86-linux-musl -mcpu=pentium4 "${args[@]}" "$query_object" -fno-sanitize=undefined
