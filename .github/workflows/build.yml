@@ -198,16 +198,16 @@ jobs:
       - name: Version and syscall checks in standard iSH
         run: |
           export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
-          timeout 120 emulator/build/ish -f guest /codex/codex --version | grep -Fx 'codex-cli 0.160.0'
+          timeout 120 emulator/build/ish -f guest /bin/sh -c '"$@"; result=$?; exit "$result"' ish-codex /codex/codex --version | grep -Fx 'codex-cli 0.160.0'
           timeout 120 emulator/build/ish -f guest /codex/diagnostics/ish-syscall-probe
       - name: Real model tool requests and subprocess roundtrips in standard iSH
         run: |
           export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
           ulimit -n 4096
           for model in gpt-6-luna gpt-6-sol gpt-6.1-sol gpt-6-astra; do
-            timeout 300 python3 tests/reproduce-direct-model.py "ish-x86-$model" /codex/compat/models-direct.json "$model" emulator/build/ish -f guest /codex/codex
+            timeout 300 python3 tests/reproduce-direct-model.py "ish-x86-$model" /codex/compat/models-direct.json "$model" emulator/build/ish -f guest /bin/sh -c '"$@"; result=$?; exit "$result"' ish-codex /codex/codex
           done
-          timeout 300 python3 tests/reproduce-ish.py ish-x86 emulator/build/ish -f guest /codex/codex --no-daemon --disable code_mode_host -c 'sandbox_mode="danger-full-access"' app-server --stdio
+          timeout 300 python3 tests/reproduce-ish.py ish-x86 emulator/build/ish -f guest /bin/sh -c '"$@"; result=$?; exit "$result"' ish-codex /codex/codex --no-daemon --disable code_mode_host -c 'sandbox_mode="danger-full-access"' app-server --stdio
       - name: Print app-server errors if verification fails
         if: failure()
         run: tail -80 ish-x86*-stderr.log || true
