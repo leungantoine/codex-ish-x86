@@ -1,0 +1,117 @@
+name: Package verified interactive startup fix
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/package-tui-fix.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require completed interactive and original binary verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api repos/$GITHUB_REPOSITORY/actions/runs/37080858989 --jq .conclusion)" = success
+          test "$(gh api repos/$GITHUB_REPOSITORY/actions/runs/37080858989 --jq .head_sha)" = 5b06636dd69c87253190a0794b63211ad293cf69
+          test "$(gh api repos/$GITHUB_REPOSITORY/actions/runs/37057721035 --jq .conclusion)" = success
+          grep -F -- "-c 'tui.animations=false'" setup.sh
+          gh release download ish-x86-v0.160.0-16.1 --repo "$GITHUB_REPOSITORY" --pattern 'codex-ish-x86.tar.gz*'
+          echo 'd4e71089ec82e7b66d0c5140cc62b6711d8be25477c7538241a67d6fbb3bf2f3  codex-ish-x86.tar.gz' | sha256sum -c -
+          sha256sum -c codex-ish-x86.tar.gz.sha256
+          mkdir package
+          tar -xzf codex-ish-x86.tar.gz -C package
+          (cd package && sha256sum -c SHA256SUMS)
+          package/codex --version | grep -Fx 'codex-cli 0.160.0'
+          grep -F a956835d020762cb2b570053af06f643a11c0ecc package/BUILDINFO
+          (cd package && sha256sum codex codex-responses-api-proxy codex-path/rg diagnostics/ish-syscall-probe > "$RUNNER_TEMP/executables.sha256")
+      - name: Record interactive startup fix and verification limit
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('README.md')
+          s=p.read_text()
+          start=s.index('**Status:')
+          stop=s.index('\n\n',start)
+          s=s[:start]+('**Status: Codex 0.160.0 binaries are published with animations disabled for iSH compatibility.** '
+              'Static ELF32, QEMU, native Linux and standard-iSH shell tests passed. '
+              'Interactive sign-in startup with the animation-free launcher also passed in the unmodified iSH 494 emulator. '
+              'A user confirmed animation-free startup on physical App Store iSH 494. Authentication, real tasks, performance and background behavior remain to be tested. '
+              '[Download the latest Release](https://github.com/leungantoine/codex-ish-x86/releases/latest).')+s[stop:]
+          s=s.replace('The launcher selects GPT-6-Luna with medium reasoning, disables the daemon and V8 code mode,',
+              'The launcher selects GPT-6-Luna with medium reasoning, disables animations, the daemon and V8 code mode,')
+          anchor='\n## Build and verification'
+          assert s.count(anchor)==1
+          s=s.replace(anchor,'\n13. The launcher sets the existing upstream option `tui.animations=false`. '
+              'A physical iSH 494 startup crash identified `DIVPD` at `0x09b94468` in '
+              '`codex_tui::empty_state_animation::geometry::field`. The optional logo renderer uses a packed floating-point instruction '
+              'that iSH does not support. Reduced motion skips that renderer without changing the Codex executable or shell tools. '
+              'Keep animations disabled on this release.\n'+anchor)
+          s+='\n### Interactive startup correction\n\n'
+          s+=('The first physical App Store iSH report passed `codex --version` and the syscall probe but exited 132 '
+              'from plain `codex`. The kernel log identified the optional startup-logo `DIVPD` instruction. '
+              '[Focused interactive verification](https://github.com/leungantoine/codex-ish-x86/actions/runs/37080858989) '
+              'tested normal and reduced-motion startup with phone-sized and large terminal layouts and terminal color replies. '
+              'Reduced-motion checks require an actually drawn TUI, graceful exit 0 and no illegal-instruction log. '
+              'The original model/tool and app-server pipe/PTY results apply to the identical executable hashes. '
+              'This packaging run verifies the updated installer, fresh bash/ash startup and the installed plain `codex` shell loop '
+              'against a mocked provider. The reporting user also confirmed that disabling animations opened the interactive TUI on physical App Store iSH 494. Authentication, real model tasks, performance and iOS background reliability remain unverified.\n')
+          p.write_text(s)
+          PY
+      - name: Repackage guide and installer while preserving executable hashes
+        run: |
+          cp README.md package/README.md
+          cp setup.sh package/setup.sh
+          (cd package && sha256sum -c "$RUNNER_TEMP/executables.sha256")
+          (cd package && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          tar -czf codex-ish-x86.tar.gz -C package .
+          sha256sum codex-ish-x86.tar.gz > codex-ish-x86.tar.gz.sha256
+          for name in codex codex-responses-api-proxy codex-path/rg diagnostics/ish-syscall-probe; do
+            readelf -h "package/$name" | grep -q 'Class:.*ELF32'
+            readelf -h "package/$name" | grep -q 'Machine:.*Intel 80386'
+            if readelf -l "package/$name" | grep -q INTERP; then exit 1; fi
+            if readelf -d "package/$name" | grep -q '(NEEDED)'; then exit 1; fi
+          done
+      - name: Verify installed defaults, login-shell PATH and real shell execution
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y busybox-static
+          mkdir "$RUNNER_TEMP/x86-uname"
+          printf '#!/bin/sh\nif [ "$1" = -m ]; then echo i686; else /usr/bin/uname "$@"; fi\n' > "$RUNNER_TEMP/x86-uname/uname"
+          chmod +x "$RUNNER_TEMP/x86-uname/uname"
+          PATH="$RUNNER_TEMP/x86-uname:$PATH" CODEX_ISH_RELEASE_BASE="file://$PWD" sh setup.sh
+          grep -F -- "-c 'tui.animations=false'" "$HOME/.local/bin/codex"
+          env -i HOME="$HOME" PATH=/usr/bin:/bin /bin/bash --login -c 'command -v codex; codex --version'
+          env -i HOME="$HOME" PATH=/usr/bin:/bin /bin/busybox ash -l -c 'command -v codex; codex --version'
+          for model in gpt-6-luna gpt-6-sol gpt-6.1-sol gpt-6-astra; do
+            python3 tests/reproduce-direct-model.py "setup-animation-fix-$model" "$PWD/package/compat/models-direct.json" "$model" "$HOME/.local/bin/codex"
+          done
+          PATH="$RUNNER_TEMP/x86-uname:$PATH" CODEX_ISH_RELEASE_BASE="file://$PWD" sh setup.sh
+          test "$(grep -Fc 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.profile")" = 1
+      - name: Publish corrected default after all tests pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md
+          git commit -m "Document verified animation-free interactive startup"
+          git push origin HEAD:main
+          gh release create ish-x86-v0.160.0-16.2 codex-ish-x86.tar.gz codex-ish-x86.tar.gz.sha256 \
+            --repo "$GITHUB_REPOSITORY" --target "$(git rev-parse HEAD)" \
+            --title 'Codex 0.160.0 for iSH: interactive startup fix' \
+            --notes 'Same verified static ELF32 executable hashes as 16.1. Updated installer disables upstream TUI animations to avoid the unsupported DIVPD startup-logo instruction reported on physical App Store iSH 494. Phone-sized and large interactive layouts passed in unmodified iSH 494 with reduced motion. Updated installed launcher, bash/ash startup and four mocked model shell roundtrips passed. Animation-free startup was also confirmed by the reporting user on physical iSH 494; authentication, real tasks and performance remain to be tested. Commands can access guest files and network.' --latest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: animation-free-codex-ish-x86
+          path: |
+            codex-ish-x86.tar.gz
+            codex-ish-x86.tar.gz.sha256
