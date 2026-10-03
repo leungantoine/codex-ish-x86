@@ -2,7 +2,7 @@
 
 This repository ports **OpenAI's real Codex CLI** to standard [App Store iSH](https://apps.apple.com/us/app/ish-shell/id1436902243), which emulates 32-bit x86. It is separate from [codex-ish](https://github.com/leungantoine/codex-ish), the ARM64 iSH-AOK project. Neither binary can be used in the other guest architecture.
 
-**Status: animation-free interactive startup is confirmed on physical App Store iSH 494.** A startup-logo `DIVPD` instruction caused the initial `Illegal instruction` failure. The updated installer disables upstream TUI animations by default. A corrected archive is being verified and packaged; existing installations can use `codex -c tui.animations=false` or rerun setup. Physical authentication, real model tasks, performance and background reliability remain to be tested.
+**Status: Codex 0.160.0 binaries are published with animations disabled for iSH compatibility.** Static ELF32, QEMU, native Linux and standard-iSH shell tests passed. Interactive sign-in startup with the animation-free launcher also passed in the unmodified iSH 494 emulator. A user confirmed animation-free startup on physical App Store iSH 494. Authentication, real tasks, performance and background behavior remain to be tested. [Download the latest Release](https://github.com/leungantoine/codex-ish-x86/releases/latest).
 
 ## Source and target
 
@@ -88,6 +88,8 @@ Daemon mode, local V8 execution, and sandboxed Linux execution are unsupported. 
 
 `scripts/prepare-source.py` checks the exact source commit before patching. `compat/PATCHINFO.json` in the archive records source, original Tokio checksum, catalog changes and final patched input hashes. `compat/RUSTSTDINFO.json` and `compat/rust-std.patch` record the runtime source pins and exact patch; Rust licenses are included. Do not apply the ARM64 project's historical overlay to this source.
 
+13. The launcher sets the existing upstream option `tui.animations=false`. A physical iSH 494 startup crash identified `DIVPD` at `0x09b94468` in `codex_tui::empty_state_animation::geometry::field`. The optional logo renderer uses a packed floating-point instruction that iSH does not support. Reduced motion skips that renderer without changing the Codex executable or shell tools. Keep animations disabled on this release.
+
 ## Build and verification
 
 The workflow uses Ubuntu 24.04 x86_64, one Cargo build job, release optimization 2, debug 0, LTO off and 16 codegen units. Scoped overrides keep `zbus` and `codex-model-provider` at one codegen unit. Compilation caches survive failed attempts. A source snapshot records SHA256, file mode and nanosecond timestamps for Codex and the rebuilt Rust standard library. On the next build, timestamps are restored only when the contents, mode and absolute source roots match; changed files retain fresh timestamps. Cargo still checks dependencies, compiler settings and features. The first snapshot-producing build remains a full rebuild; subsequent unchanged inputs can reuse their compiled outputs. Canceled jobs skip cache saving to avoid racing active compiler outputs.
@@ -123,3 +125,7 @@ codex --version
 ## Maintenance
 
 Inspect the pinned upstream source and dependencies before upgrading. Recreate only still-needed compatibility patches, refresh the matching model catalog, dependency lock metadata and input hashes, compile actual binaries, repeat the verification gates, and then publish. Follow `AGENTS.md` here and in upstream. This is an independent compatibility port, not an official OpenAI or iSH distribution.
+
+### Interactive startup correction
+
+The first physical App Store iSH report passed `codex --version` and the syscall probe but exited 132 from plain `codex`. The kernel log identified the optional startup-logo `DIVPD` instruction. [Focused interactive verification](https://github.com/leungantoine/codex-ish-x86/actions/runs/37080858989) tested normal and reduced-motion startup with phone-sized and large terminal layouts and terminal color replies. Reduced-motion checks require an actually drawn TUI, graceful exit 0 and no illegal-instruction log. The original model/tool and app-server pipe/PTY results apply to the identical executable hashes. This packaging run verifies the updated installer, fresh bash/ash startup and the installed plain `codex` shell loop against a mocked provider. The reporting user also confirmed that disabling animations opened the interactive TUI on physical App Store iSH 494. Authentication, real model tasks, performance and iOS background reliability remain unverified.
