@@ -135,12 +135,24 @@ jobs:
           print("terminal transcript:", repr(bytes(transcript)[-20000:]))
           print("kernel log:", Path("tui-kernel.log").read_text(errors="replace"))
           print("emulator exit:", os.waitstatus_to_exitcode(status))
+          
+          if os.environ.get("TUI_EXPECT_SUCCESS") == "1":
+              assert os.waitstatus_to_exitcode(status) == 0, "Interactive Codex did not exit cleanly"
+              assert b"OpenAI Codex" in transcript or b"Welcome to" in transcript, "TUI was not drawn"
+              assert b"illegal instruction" not in Path("tui-kernel.log").read_bytes()
+              print("PASS: actual interactive TUI drawn and exited 0 with animations disabled")
           PY
-          for dimensions in 40x44 100x50; do
-            export TUI_COLS="${dimensions%x*}" TUI_ROWS="${dimensions#*x}"
-            python3 tui-diagnostic.py emulator/build/ish -f guest /bin/sh -c '"$@"; result=$?; exit "$result"' ish-codex /codex/codex --no-daemon --disable code_mode_host --disable code_mode --disable code_mode_only -c 'model="gpt-6-luna"' -c 'model_reasoning_effort="medium"' -c 'sandbox_mode="danger-full-access"' -c 'approval_policy="on-request"' -c 'model_catalog_json="/codex/compat/models-direct.json"'
-            cp tui-terminal.log "tui-terminal-$dimensions.log"
-            cp tui-kernel.log "tui-kernel-$dimensions.log"
+          for variant in normal-phone normal-large reduced-phone reduced-large; do
+            case "$variant" in
+              *-phone) export TUI_COLS=40 TUI_ROWS=44 ;;
+              *-large) export TUI_COLS=100 TUI_ROWS=50 ;;
+            esac
+            set --
+            export TUI_EXPECT_SUCCESS=0
+            case "$variant" in reduced-*) set -- -c tui.animations=false; export TUI_EXPECT_SUCCESS=1 ;; esac
+            python3 tui-diagnostic.py emulator/build/ish -f guest /bin/sh -c '"$@"; result=$?; exit "$result"' ish-codex /codex/codex --no-daemon --disable code_mode_host --disable code_mode --disable code_mode_only -c 'model="gpt-6-luna"' -c 'model_reasoning_effort="medium"' -c 'sandbox_mode="danger-full-access"' -c 'approval_policy="on-request"' -c 'model_catalog_json="/codex/compat/models-direct.json"' "$@"
+            cp tui-terminal.log "tui-terminal-$variant.log"
+            cp tui-kernel.log "tui-kernel-$variant.log"
           done
       - name: Identify unsupported instruction and actual linked function
         run: |
