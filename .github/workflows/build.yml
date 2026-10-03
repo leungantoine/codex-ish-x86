@@ -145,7 +145,10 @@ jobs:
         if: always()
         with:
           name: native-x86-tool-logs
-          path: '*-stderr.log'
+          path: |
+            *-stderr.log
+            interactive-*-kernel.log
+            interactive-*-terminal.log
   verify-ish:
     needs: build
     runs-on: macos-15
@@ -208,6 +211,14 @@ jobs:
             timeout 300 python3 tests/reproduce-direct-model.py "ish-x86-$model" /codex/compat/models-direct.json "$model" emulator/build/ish -f guest /bin/sh -c '"$@"; result=$?; exit "$result"' ish-codex /codex/codex
           done
           timeout 300 python3 tests/reproduce-ish.py ish-x86 emulator/build/ish -f guest /bin/sh -c '"$@"; result=$?; exit "$result"' ish-codex /codex/codex --no-daemon --disable code_mode_host -c 'sandbox_mode="danger-full-access"' app-server --stdio
+      - name: Verify actual interactive startup with iSH launcher defaults
+        run: |
+          export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+          ulimit -n 4096
+          for dimensions in 40x44 100x50; do
+            export TUI_COLS="${dimensions%x*}" TUI_ROWS="${dimensions#*x}"
+            timeout 180 python3 tests/verify-interactive-startup.py "interactive-$dimensions" emulator/build/ish -f guest /bin/sh -c '"$@"; result=$?; exit "$result"' ish-codex /codex/codex --no-daemon --disable code_mode_host --disable code_mode --disable code_mode_only -c 'tui.animations=false' -c 'model="gpt-6-luna"' -c 'model_reasoning_effort="medium"' -c 'sandbox_mode="danger-full-access"' -c 'approval_policy="on-request"' -c 'model_catalog_json="/codex/compat/models-direct.json"'
+          done
       - name: Print app-server errors if verification fails
         if: failure()
         run: tail -80 ish-x86*-stderr.log || true
