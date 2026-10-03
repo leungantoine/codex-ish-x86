@@ -84,7 +84,7 @@ jobs:
               os.environ.pop("CODEX_API_KEY", None)
               os.execvp(command[0], command)
           os.close(666)
-          fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+          fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", int(os.environ.get("TUI_ROWS", "44")), int(os.environ.get("TUI_COLS", "40")), 0, 0))
           transcript = bytearray()
           deadline = time.monotonic() + 90
           entered = False
@@ -107,7 +107,9 @@ jobs:
                   # Answer terminal queries; keep user input separate from replies.
                   for query, reply in [(b"\x1b[6n", b"\x1b[1;1R"),
                                        (b"\x1b[c", b"\x1b[?1;2c"),
-                                       (b"\x1b[>c", b"\x1b[>0;1;0c")]:
+                                       (b"\x1b[>c", b"\x1b[>0;1;0c"),
+                                       (b"\x1b]10;?\x1b\\", b"\x1b]10;rgb:0000/0000/0000\x1b\\"),
+                                       (b"\x1b]11;?\x1b\\", b"\x1b]11;rgb:ffff/ffff/ffff\x1b\\")]:
                       while query in pending:
                           os.write(master, reply)
                           pending = pending.replace(query, b"", 1)
@@ -116,7 +118,7 @@ jobs:
               if waited:
                   status = result
                   break
-              if not entered and time.monotonic() > deadline - 80:
+              if os.environ.get("TUI_ENTER") == "1" and not entered and time.monotonic() > deadline - 80:
                   os.write(master, b"\r")
                   entered = True
               if not interrupted and time.monotonic() > deadline - 30:
@@ -134,14 +136,19 @@ jobs:
           print("kernel log:", Path("tui-kernel.log").read_text(errors="replace"))
           print("emulator exit:", os.waitstatus_to_exitcode(status))
           PY
-          python3 tui-diagnostic.py emulator/build/ish -f guest /bin/sh -c '"$@"; result=$?; exit "$result"' ish-codex /codex/codex --no-daemon --disable code_mode_host --disable code_mode --disable code_mode_only -c 'model="gpt-6-luna"' -c 'model_reasoning_effort="medium"' -c 'sandbox_mode="danger-full-access"' -c 'approval_policy="on-request"' -c 'model_catalog_json="/codex/compat/models-direct.json"' -c 'model_provider="ish_mock"' -c 'model_providers.ish_mock={name="Local mock",base_url="http://127.0.0.1:9/v1",wire_api="responses",requires_openai_auth=false,supports_websockets=false}'
+          for dimensions in 40x44 100x50; do
+            export TUI_COLS="${dimensions%x*}" TUI_ROWS="${dimensions#*x}"
+            python3 tui-diagnostic.py emulator/build/ish -f guest /bin/sh -c '"$@"; result=$?; exit "$result"' ish-codex /codex/codex --no-daemon --disable code_mode_host --disable code_mode --disable code_mode_only -c 'model="gpt-6-luna"' -c 'model_reasoning_effort="medium"' -c 'sandbox_mode="danger-full-access"' -c 'approval_policy="on-request"' -c 'model_catalog_json="/codex/compat/models-direct.json"'
+            cp tui-terminal.log "tui-terminal-$dimensions.log"
+            cp tui-kernel.log "tui-kernel-$dimensions.log"
+          done
       - name: Identify unsupported instruction and actual linked function
         run: |
           export PATH="$(brew --prefix llvm)/bin:$PATH"
           python3 - <<'PY'
           import re,subprocess
           from pathlib import Path
-          log=Path('tui-kernel.log').read_text(errors='replace')
+          log='\n'.join(p.read_text(errors='replace') for p in Path('.').glob('tui-kernel-*.log'))
           for address in re.findall(r'illegal instruction at (0x[0-9a-f]+)',log):
               pc=int(address,16)
               subprocess.run(['llvm-objdump','--demangle','--disassemble',f'--start-address={pc-32}',f'--stop-address={pc+64}','package/codex'],check=True)
@@ -160,5 +167,5 @@ jobs:
         with:
           name: interactive-ish-startup-logs
           path: |
-            tui-kernel.log
-            tui-terminal.log
+            tui-kernel*.log
+            tui-terminal*.log
