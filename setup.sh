@@ -28,6 +28,7 @@ cat > "$launcher" <<'SH'
 #!/bin/sh
 exec "$HOME/.local/opt/codex-ish-x86/codex" \
   --no-daemon --disable code_mode_host --disable code_mode --disable code_mode_only \
+  -c 'tui.animations=false' \
   -c 'model="gpt-6-luna"' -c 'model_reasoning_effort="medium"' \
   -c 'sandbox_mode="danger-full-access"' -c 'approval_policy="on-request"' \
   -c "model_catalog_json=\"$HOME/.local/opt/codex-ish-x86/compat/models-direct.json\"" "$@"
