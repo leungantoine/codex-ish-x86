@@ -2,7 +2,7 @@
 
 This repository ports **OpenAI's real Codex CLI** to standard [App Store iSH](https://apps.apple.com/us/app/ish-shell/id1436902243), which emulates 32-bit x86. It is separate from [codex-ish](https://github.com/leungantoine/codex-ish), the ARM64 iSH-AOK project. Neither binary can be used in the other guest architecture.
 
-**Status: Codex 0.160.0 binaries are published; a physical-device interactive startup failure is under investigation.** Static ELF32 checks, QEMU, native Linux, and noninteractive shell/app-server tests in unmodified standard iSH passed. A user reported `Illegal instruction` when launching plain `codex` in the App Store app; those earlier checks did not cover the interactive TUI startup path. Physical iOS authentication, interactive tasks, performance and background behavior remain to be tested. [Download the latest Release](https://github.com/leungantoine/codex-ish-x86/releases/latest).
+**Status: animation-free interactive startup is confirmed on physical App Store iSH 494.** A startup-logo `DIVPD` instruction caused the initial `Illegal instruction` failure. The updated installer disables upstream TUI animations by default. A corrected archive is being verified and packaged; existing installations can use `codex -c tui.animations=false` or rerun setup. Physical authentication, real model tasks, performance and background reliability remain to be tested.
 
 ## Source and target
 
@@ -32,7 +32,7 @@ codex
 
 The installer checks the guest architecture, verifies the Release archive and all internal file checksums, installs to `~/.local/opt/codex-ish-x86`, creates `~/.local/bin/codex`, and saves PATH in shell startup files. It does not automatically launch Codex when iSH opens. Existing authentication and configuration in `~/.codex` are retained. Repeating the command upgrades the package and launcher. Do not install this over an ARM64 guest.
 
-The launcher selects GPT-6-Luna with medium reasoning, disables the daemon and V8 code mode, and supplies this release's direct-tool catalog. To select another model:
+The launcher selects GPT-6-Luna with medium reasoning, disables animations, the daemon and V8 code mode, and supplies this release's direct-tool catalog. To select another model:
 
 ```sh
 codex --model gpt-6-sol
